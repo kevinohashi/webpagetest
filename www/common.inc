@@ -1,6 +1,24 @@
 <?php
+// Copyright 2020 Catchpoint Systems Inc.
+// Use of this source code is governed by the Polyform Shield 1.0.0 license that can be
+// found in the LICENSE.md file.
 require_once('./common_lib.inc');
 require_once('./plugins.php.inc');
+require_once('./util.inc');
+
+// Disable caching by default
+header("Cache-Control: no-store, no-cache, must-revalidate, max-age=0", true);
+
+if (GetSetting("serverID")) {
+  header('X-WPT-Server: ' . GetSetting("serverID"));
+}
+
+if (isset($REDIRECT_HTTPS) && $REDIRECT_HTTPS && !isSslConnection() && GetSetting('prefer_https')) {
+    $location = 'https://' . $_SERVER['HTTP_HOST'] . $_SERVER['REQUEST_URI'];
+    header('HTTP/1.1 301 Moved Permanently');
+    header('Location: ' . $location);
+    exit(0);
+}
 
 // if any query parameter includes a .., exit right away - likely a hack attempt
 foreach($_REQUEST as $key => $val) {
@@ -10,6 +28,21 @@ foreach($_REQUEST as $key => $val) {
         echo "<br>" . htmlspecialchars($key) . " - " . htmlspecialchars($val) . "</body></html>";
         exit(0);
     }
+}
+// fast exit for Nagios monitoring scripts
+if (array_key_exists('HTTP_USER_AGENT', $_SERVER) &&
+    strlen($_SERVER['HTTP_USER_AGENT']) &&
+    stripos($_SERVER['HTTP_USER_AGENT'], 'nagios') !== false) {
+    echo "OK";
+    exit(0);
+}
+// Blocked user agent strings
+if (array_key_exists('HTTP_USER_AGENT', $_SERVER) && strlen($_SERVER['HTTP_USER_AGENT'])) {
+  if (preg_match('/UAEmdDd8nuc0DvQH29vueQpMtlFduGU48pbw/i', $_SERVER['HTTP_USER_AGENT'])) {
+    header('HTTP/1.1 403 Forbidden');
+    echo "<html><body>Sorry, the request was blocked for constantly requesting invalid content, please contact us for details.";
+    exit(0);
+  }
 }
 
 // shared initializiation/loading code
@@ -22,8 +55,33 @@ date_default_timezone_set('UTC');
 extract($_POST, EXTR_SKIP|EXTR_PREFIX_ALL|EXTR_REFS, 'req');
 extract($_GET, EXTR_SKIP|EXTR_PREFIX_ALL|EXTR_REFS, 'req');
 
-// add a CORS header
-header('Access-Control-Allow-Origin: *');
+// Prevent embedding except for pages that were explicitly designed to be embedded (video)
+if (!isset($ALLOW_IFRAME) || !$ALLOW_IFRAME) {
+  header('X-Frames-Options: sameorigin');
+}
+
+// Block indexing on everything except www
+if (GetSetting('host', '') != 'www.webpagetest.org') {
+  header('X-Robots-Tag: noindex');
+}
+
+// Compact-mode UI
+$COMPACT_MODE = false;
+if (isset($_REQUEST['compact'])) {
+  if ($_REQUEST['compact']) {
+    setcookie('compact', '1', time()+60*60*24*365, '/');
+    $COMPACT_MODE = true;
+  } else {
+    setcookie('compact', '0', time()+60*60*24*365, '/');
+  }
+} elseif (isset($_COOKIE['compact'])) {
+  if ($_COOKIE['compact']) {
+    setcookie('compact', '1', time()+60*60*24*365, '/');
+    $COMPACT_MODE = true;
+  } else {
+    setcookie('compact', '0', time()+60*60*24*365, '/');
+  }
+}
 
 // set up a global curl context that can be used for keep-alive connections (particularly when doing bulk relays)
 if (function_exists('curl_init')) {
@@ -42,21 +100,27 @@ if (function_exists('curl_init')) {
 } else
     $CURL_CONTEXT = false;
 
+if (isset($_SERVER["REMOTE_ADDR"]) && $_SERVER["REMOTE_ADDR"] == '127.0.0.1' && isset($_REQUEST['addr'])) {
+  $_SERVER["REMOTE_ADDR"] = $_REQUEST['addr'];
+}
 if (function_exists('apache_request_headers')) {
     $headers = apache_request_headers();
     if (array_key_exists('X-Forwarded-For', $headers)){
-        $_SERVER["REMOTE_ADDR"] = $headers['X-Forwarded-For'];
+        $_SERVER["HTTP_X_FORWARDED_FOR"] = $headers['X-Forwarded-For'];
     }
 }
 if (isset($_SERVER["HTTP_X_FORWARDED_FOR"])) {
   $forwarded = explode(',',$_SERVER["HTTP_X_FORWARDED_FOR"]);
   if (isset($forwarded) && is_array($forwarded) && count($forwarded)) {
-    $forwarded_ip = trim($forwarded[0]);
-    if (strlen($forwarded_ip))
+    $forwarded_ip = trim(end($forwarded));
+    if (strlen($forwarded_ip) && $forwarded_ip != "127.0.0.1")
         $_SERVER["REMOTE_ADDR"] = $forwarded_ip;
   }
 }
-if (array_key_exists('HTTP_MOD_REWRITE', $_SERVER) && $_SERVER['HTTP_MOD_REWRITE'] == 'On') {
+if (isset($_SERVER["HTTP_FASTLY_CLIENT_IP"]))
+  $_SERVER["REMOTE_ADDR"] = $_SERVER["HTTP_FASTLY_CLIENT_IP"];
+
+if (GetSetting('friendly_urls') || (array_key_exists('HTTP_MOD_REWRITE', $_SERVER) && $_SERVER['HTTP_MOD_REWRITE'] == 'On')) {
     define('FRIENDLY_URLS', true);
     define('VER_TIMELINE', '28/');       // version of the timeline javascript
 } else {
@@ -64,75 +128,60 @@ if (array_key_exists('HTTP_MOD_REWRITE', $_SERVER) && $_SERVER['HTTP_MOD_REWRITE
     define('VER_TIMELINE', '');       // Leave the timeline version empty
 }
 
+$privateInstall = true;
+if (array_key_exists('HTTP_HOST', $_SERVER) &&
+    stristr($_SERVER['HTTP_HOST'] , 'httparchive.webpagetest.org') === false &&
+    stristr($_SERVER['HTTP_HOST'] , 'webpagetest.org') !== false) {
+    $privateInstall = false;
+}
+
 $userIsBot = false;
-if (array_key_exists('HTTP_USER_AGENT', $_SERVER) &&
-    strlen($_SERVER['HTTP_USER_AGENT']) &&
-    preg_match('/robot|spider|crawler|indexer|WeSEE|AppEngine-Google|Googlebot|^$/i', $_SERVER['HTTP_USER_AGENT']))
-  $userIsBot = true;
+if (!$privateInstall) {
+  if (array_key_exists('HTTP_USER_AGENT', $_SERVER) &&
+      strlen($_SERVER['HTTP_USER_AGENT'])) {
+    if (preg_match('/robot|spider|crawler|indexer|WeSEE|Googlebot|YandexBot|Twitterbot|SemrushBot|Slackbot|Slack-ImgProxy|bingbot|SEOdiver|EPiServer|BlockBit|Wget|Faraday|Apache-HttpClient|WebSpeedTest|wptagent|^$/i', $_SERVER['HTTP_USER_AGENT'])) {
+      $userIsBot = true;
+    }
+  } else {
+    $userIsBot = true;
+  }
+}
 
 // constants
-define('VER_WEBPAGETEST', '2.16');   // webpagetest version
-define('VER_CSS', 67);           // version of the sitewide css file
-define('VER_JS', 31);            // version of the sitewide javascript file
-define('VER_JS_TEST', 29);       // version of the javascript specific to the test pages
-define('VER_JS_RUNNING', 1);     // version of the javascript specific to the test running status page
-define('UNKNOWN_TIME', -1);      // Value used as a flag for an unknown time.
-                                 // To find code that fails to check that a time
-                                 // is unknown, change this constant to a large
-                                 // negative number.
+define('VER_WEBPAGETEST', '20.06');   // webpagetest version
+define('VER_CSS', 133);                // version of the sitewide css file
+define('VER_JS', 40);                 // version of the sitewide javascript file
+define('VER_JS_TEST', 47);            // version of the javascript specific to the test pages
+define('VER_JS_RUNNING', 1);          // version of the javascript specific to the test running status page
+define('UNKNOWN_TIME', -1);           // Value used as a flag for an unknown time.
+                                      // To find code that fails to check that a time
+                                      // is unknown, change this constant to a large
+                                      // negative number.
 
 // SEO stuff
-$page_keywords = array('Webpagetest','Website Speed Test','Page Speed');
+$page_keywords = array('WebPageTest','Website Speed Test','Page Speed');
 $page_description = "Run a free website speed test from around the globe using real browsers at consumer connection speeds with detailed optimization recommendations.";
 
 $tempDir = './tmp';
 if (!is_dir($tempDir))
     mkdir($tempDir, 0777, true);
 $tempDir = realpath($tempDir) . '/';
-define('PCLZIP_TEMPORARY_DIR', $tempDir);
 
-if (isset($req_embed)) {
+if (isset($_REQUEST['embed'])) {
     define('EMBED', true);
     define('BARE_UI', true);
     define('NAV_NO_SHARE', true);
-} elseif (isset($req_bare)) {
+} elseif (isset($_REQUEST['bare'])) {
     define('BARE_UI', true);
     define('NAV_NO_SHARE', true);
     $noanalytics = true;
     if (extension_loaded('newrelic'))
       @newrelic_disable_autorum();
 }
-// load the install-specific settings
-$settings = parse_ini_file('./settings/settings.ini');
-if (!isset($settings) || !is_array($settings))
-    $settings = array();
-if (!array_key_exists('nogzip', $settings))
-    $settings['nogzip'] = false;
-if (!array_key_exists('nolinks', $settings))
-    $settings['nolinks'] = 0;
-if (!array_key_exists('shard_tests', $settings))
-    $settings['shard_tests'] = 0;
-
-$privateInstall = true;
-if( array_key_exists('HTTP_HOST', $_SERVER) && stristr($_SERVER['HTTP_HOST'] , '.webpagetest.org') !== false )
-    $privateInstall = false;
-
-// override some settings from the URI
-if (isset($req_bulk)) {
-    $settings['noBulk'] = 0;
-}
-$is_ssl = ((isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] == 'on') || (isset($_SERVER['HTTP_SSL']) && $_SERVER['HTTP_SSL'] == 'On')) ? true : false;
+$is_ssl = isSslConnection();
 $GLOBALS['cdnPath'] = '';
-if (isset($settings['cdn']) && !$is_ssl) {
-    $GLOBALS['cdnPath'] = $settings['cdn'];
-}
-$GLOBALS['ptotocol'] = 'http';
-if ($is_ssl) {
-    $GLOBALS['ptotocol'] = 'https';
-}
-$median_metric = 'loadTime';
-if (array_key_exists('medianMetric', $_REQUEST)) {
-    $median_metric = $_REQUEST['medianMetric'];
+if (GetSetting('cdn') && !$is_ssl) {
+    $GLOBALS['cdnPath'] = GetSetting('cdn');
 }
 
 $tz_offset = null;
@@ -141,108 +190,120 @@ if (isset($_COOKIE['tzo'])) {
 }
 SetLocaleFromBrowser();
 
-// some myBB integration to get the requesting user
+$USER_EMAIL = null;
 $supportsAuth = false;
+$supportsSaml = GetSetting('saml_login') !== false;
+if ($supportsSaml) {
+  $supportsAuth = true;
+} elseif (GetSetting('google_oauth_client_id') && GetSetting('google_oauth_client_secret')) {
+  $supportsAuth = true;
+}
 $uid = NULL;
 $user = NULL;
 $admin = false;
 $api_keys;
-if (is_dir('./forums') && (!array_key_exists('disableMybb', $settings) || !$settings['disableMybb'])) {
-    ob_start();
-    $supportsAuth = true;
 
-    if (isset($_COOKIE['mybbuser'])) {
-        $dir = getcwd();
-        try {
-            define("IN_MYBB",1);
-            chdir('forums'); // path to MyBB
-            include './global.php';
+if ($supportsSaml) {
+  $USER_EMAIL = GetSamlEmail();
+} elseif( isset($_COOKIE['google_email']) && isset($_COOKIE['google_id']) ) {
+  $USER_EMAIL = $_COOKIE['google_email'];
+}
 
-            $uid = $mybb->user['uid'];
-            $user = $mybb->user['username'];
-            if( $mybb->usergroup['cancp'] )
-                $admin = true;
-            unset($mybb);
+if (!$admin) {
+  $this_user = null;
+  if (isset($user)) {
+    $this_user = $user;
+  } elseif (isset($USER_EMAIL)) {
+    $this_user = $USER_EMAIL;
+  }
+  if (isset($this_user) && strlen($this_user)) {
+    $admin_users = GetSetting("admin_users");
+    if ($admin_users) {
+      $admin_users = explode(',', $admin_users);
+      if (is_array($admin_users) && count($admin_users)) {
+        foreach($admin_users as $substr) {
+          if (stripos($this_user, $substr) !== false) {
+            $admin = true;
+            break;
+          }
         }
-        catch(Exception $e) {
-        }
-        chdir($dir);
+      }
     }
-    ob_end_clean();
+  }
 }
 
 // assign a unique ID to each person
+$isFirstVisit = true;
 $isOwner = false;
 $owner = null;
-if( isset($_COOKIE['google_id']) && strlen($_COOKIE['google_id']) ) {
+if ($supportsSaml) {
+  $isFirstVisit = false;
+  $owner = GetSamlAccount();
+} elseif( isset($_COOKIE['google_id']) && strlen($_COOKIE['google_id']) ) {
+  $isFirstVisit = false;
   $owner = $_COOKIE['google_id'];
-  if (!isset($user))
-    $user = $owner;
-}
-else if( isset($_COOKIE['o']) && strlen($_COOKIE['o']) ){
+} else if( isset($_COOKIE['o']) && strlen($_COOKIE['o']) ){
+  $isFirstVisit = false;
   $owner = $_COOKIE['o'];
-}else{
+}
+if (!isset($owner)) {
   $owner = sha1(uniqid(uniqid('', true), true));
 }
+// Sanitize the owner string
+$owner = preg_replace('/[^a-zA-Z0-9]/', '', $owner);
 setcookie('o', $owner, time()+60*60*24*365, '/');
 
-if( $supportsAuth && ($admin || (array_key_exists('google_email', $_COOKIE) && strpos($_COOKIE['google_email'], '@google.com') !== false)) ) {
-    $settings['enable_google_csi'] = true;
-}
-
 // set their color selection as a cookie
-if (isset($req_color)) {
-    setcookie('color', $req_color, time()+60*60*24*365, '/');
-    $_REQUEST['color'] = $req_color;
+if (isset($_REQUEST['color'])) {
+    setcookie('color', $_REQUEST['color'], time()+60*60*24*365, '/');
+    $_REQUEST['color'] = $_REQUEST['color'];
 }
 
 // Load the test-specific data
 $id = '';
-if (preg_match('/^[a-zA-Z0-9_]+$/', @$req_test)) {
-    $id = $req_test;
-} elseif (preg_match('/^[a-zA-Z0-9_]+$/', @$_COOKIE['tid'])) {
-    $id = $_COOKIE['tid'];
+if (isset($_REQUEST['test']) && preg_match('/^[a-zA-Z0-9_]+$/', @$_REQUEST['test'])) {
+    $id = $_REQUEST['test'];
 }
 
+$median_metric = GetSetting('medianMetric') ? GetSetting('medianMetric') : 'loadTime';
 $testLabel = '';
 if (strlen($id)) {
-    if (@strlen($req_rkey)) {
+    if(extension_loaded('newrelic')) {
+        newrelic_add_custom_parameter ('testID', $id);
+    }  
+    if (isset($_REQUEST['rkey']) && @strlen($_REQUEST['rkey'])) {
         // We are serving a relay request, so munge the id accordingly.
-        $id = trim(htmlspecialchars($req_rkey)) . ".$id";
-    }
-    if ($id !== @$_COOKIE['tid']) {
-        setcookie('tid', $id);  // update session cookie
+        $id = trim(htmlspecialchars($_REQUEST['rkey'])) . ".$id";
     }
     if (!$userIsBot)
       RestoreTest($id);   // restore the test if it is archived (and deleted)
 
     $testPath = './' . GetTestPath($id);
-    if (@$settings['archive'] && !is_dir($testPath) &&
-        is_file('storage/storage.ini') && is_file('storage/storage.inc')) {
-        // testPath does not exist, so download from the remote storage.
-        require_once('storage/storage.inc');
-        DownloadResults($id);
-    }
-
-    $run = htmlspecialchars(@$req_run);
-    if (!$run) {
-        $run = (int)1;
-    }
-    $cached = @(int)$req_cached;  // define a global used in other files
-    if (array_key_exists('run', $_REQUEST) && !strcasecmp($_REQUEST['run'], 'median')) {
-      require_once('page_data.inc');
-      $pageData = loadAllPageData($testPath, $options);
-      $run = GetMedianRun($pageData, $cached);
-    }
-    $cachedText = $cached ? '_Cached' : '';
     $test = array();
     if (is_file("$testPath/testinfo.ini")) {
-        $test = parse_ini_file("$testPath/testinfo.ini",true);
+        $test = @parse_ini_file("$testPath/testinfo.ini",true);
         if (!$userIsBot)
           touch("$testPath/testinfo.ini");
     }
-    $testDate = null;
     $test['testinfo'] = GetTestInfo($id);
+    if (isset($test['testinfo']['medianMetric']))
+      $median_metric = $test['testinfo']['medianMetric'];
+
+    $run = isset($_REQUEST['run']) ? intval($_REQUEST['run']) : 0;
+    if (!$run) {
+        $run = (int)1;
+    }
+    $step = max(1, isset($_REQUEST['step']) ? @(int)$_REQUEST['step'] : 1); // default is step=1
+    $cached = isset($_REQUEST['cached']) ? @(int)$_REQUEST['cached'] : 0;  // define a global used in other files
+    if (array_key_exists('run', $_REQUEST) && !strcasecmp($_REQUEST['run'], 'median')) {
+      require_once 'include/TestInfo.php';
+      require_once 'include/TestResults.php';
+      $testInfo = TestInfo::fromFiles($testPath);
+      $testResults = TestResults::fromFiles($testInfo);
+      $run = $testResults->getMedianRunNumber($median_metric, $cached);
+    }
+    $cachedText = $cached ? '_Cached' : '';
+    $testDate = null;
     if ($test['testinfo']) {
       if( array_key_exists('completed', $test['testinfo']))
           $testDate = strftime('%x %X', (int)$test['testinfo']['completed'] + ($tz_offset * 60));
@@ -275,13 +336,33 @@ if (strlen($id)) {
         if( isset($testDate) && strlen($testDate) )
             $testLabel .= " - $testDate";
     }
-    
+
     if (!isset($test)) {
         $test = array();
     }
-    
+
     if (!array_key_exists('testinfo', $test)) {
         $test['testinfo'] = array();
     }
 }
-?>
+
+// see if we need to proxy requests to another server (after restoring the test and if we don't have it locally)
+if (isset($testPath) && !is_dir($testPath)) {
+  if ($_SERVER['REQUEST_METHOD'] === 'GET' &&
+      strpos($_SERVER['REQUEST_URI'], '/video/', 0) !== 0 &&
+      preg_match('/\d\d\d\d\d\d_([\w]+)i[^_]+_[\w]+/', $_SERVER['QUERY_STRING'], $matches)) {
+    $proxy_host = GetSetting("proxy_{$matches[1]}");
+    if ($proxy_host) {
+      proxy_request($proxy_host);
+      exit(0);
+    }
+  }
+}
+
+if (array_key_exists('medianMetric', $_REQUEST)) {
+    $median_metric = htmlspecialchars($_REQUEST['medianMetric']);
+}
+
+if (is_file('./settings/custom_common.inc.php')) {
+    include('./settings/custom_common.inc.php');
+}

@@ -1,9 +1,13 @@
 <?php
-require_once('devtools.inc.php');
-if(extension_loaded('newrelic')) { 
+// Copyright 2020 Catchpoint Systems Inc.
+// Use of this source code is governed by the Polyform Shield 1.0.0 license that can be
+// found in the LICENSE.md file.
+require_once __DIR__ . '/devtools.inc.php';
+require_once __DIR__ . '/include/UrlGenerator.php';
+
+if(extension_loaded('newrelic')) {
     newrelic_add_custom_tracer('LoadRequests');
     newrelic_add_custom_tracer('FixUpRequestTimes');
-    newrelic_add_custom_tracer('AddLocationData');
     newrelic_add_custom_tracer('AddHeaders');
     newrelic_add_custom_tracer('AddResponseBodyFlags');
     newrelic_add_custom_tracer('BuildRequestDependencies');
@@ -13,56 +17,87 @@ if(extension_loaded('newrelic')) {
 * Load the object data file.
 */
 function getRequests($id, $test_path, $run, $is_cached,
-                     &$has_secure_requests, &$has_locations,
-                     $use_location_check, $use_raw_headers = false) {
-    if (!isset($test_path) || !strlen($test_path))
-        $test_path = './' . GetTestPath($id);
-    $cached_text = ((bool)@$is_cached) ? '_Cached' : '';
-    $file_prefix = $test_path . '/' . $run . $cached_text . '_';
-    $request_file_name =  $file_prefix . 'IEWTR.txt';
-    $headers_file_name = $file_prefix . 'report.txt';
-    $bodies_file_name = $file_prefix . 'bodies.zip';
-    $custom_rules_file_name = $file_prefix . 'custom_rules.json';
+                     &$has_secure_requests, $use_raw_headers = false, $step = 1) {
+  if (!isset($test_path) || !strlen($test_path))
+    $test_path = './' . GetTestPath($id);
+  $localPaths = new TestPaths($test_path, $run, $is_cached, $step);
+  $urlGenerator = UrlGenerator::create(false, "", $id, $run, $is_cached);
+  return getRequestsForStep($localPaths, $urlGenerator, $has_secure_requests, $use_raw_headers);
+}
 
-    $needHeaders = false;
-    $requests = LoadRequests($request_file_name);
-    if (isset($requests) && is_array($requests) && count($requests)) {
-        if ($use_raw_headers)
-            $needHeaders = true;
-
+/**
+ * @param TestPaths $localPaths Paths for the run or step to load the requests for
+ * @param UrlGenerator $rootUrlGenerator Generator for the run or step related root URLs (i.e. without host)
+ * @param bool $has_secure_requests Gets set to true if at least one request is secure
+ * @param bool $has_locations Gets set to true if location data is included in the requests
+ * @param bool $use_location_check If true, location data will be added to the requests
+ * @param bool $use_raw_headers If true, raw headers are added. False by default
+ * @return array The loaded requests
+ */
+function getRequestsForStep($localPaths, $rootUrlGenerator, &$has_secure_requests, $use_raw_headers = false) {
+    $request_file_name =  $localPaths->requestDataFile();
+    $request_json_file_name =  $localPaths->requestDataJsonFile();
+    $headers_file_name = $localPaths->headersFile();
+    $bodies_file_name = $localPaths->bodiesFile();
+    $script_timing_file_name = $localPaths->devtoolsScriptTimingFile();
+    $cache_version = 4;
+    $cache_file = $localPaths->requestsCacheFile($cache_version);
+    $devtools_request = $localPaths->devtoolsProcessedRequestsFile();
+    $requests = null;
+    $cached = true;
+    if (gz_is_file($cache_file) && !isset($_REQUEST['recalculate'])) {
+      $requests = json_decode(gz_file_get_contents($cache_file), true);
+    } elseif (gz_is_file($devtools_request)) {
+      GetDevToolsRequestsForStep($localPaths, $requests, $pageData);
+      if (isset($requests)) {
+        FixUpRequestTimes($requests);
         AddResponseBodyFlags($requests, $bodies_file_name);
-
-        // load any custom checks if they are available
-        $custom_rules = array();
-        if (gz_is_file($custom_rules_file_name))
-            $custom_rules = json_decode(gz_file_get_contents($custom_rules_file_name), true);
-    } else
-        GetDevToolsRequests($test_path, $run, $is_cached, $requests, $pageData);
-    FixUpRequestTimes($requests);
-    if ($needHeaders)
-        AddHeaders($requests, $headers_file_name);
-
-    $has_locations = false;
-    if ($use_location_check) {
-        $has_locations = AddLocationData($requests);
+        AddScriptTimings($requests, $script_timing_file_name);
+      }
+    }
+    if (!isset($requests) || !is_array($requests)) {
+      $cached = false;
+      $needHeaders = false;
+      $requests = LoadRequests($request_file_name);
+      if (isset($requests) && is_array($requests) && count($requests)) {
+        if ($use_raw_headers)
+          $needHeaders = true;
+      } else {
+        if (gz_is_file($request_json_file_name))
+          $requests = json_decode(gz_file_get_contents($request_json_file_name), true);
+        else
+          GetDevToolsRequestsForStep($localPaths, $requests, $pageData);
+      }
+      AddResponseBodyFlags($requests, $bodies_file_name);
+      FixUpRequestTimes($requests);
+      if ($needHeaders)
+          AddHeaders($requests, $headers_file_name);
+      AddScriptTimings($requests, $script_timing_file_name);
+      // make sure everything is utf-8 encoded
+      $requests = MakeUTF8($requests);
     }
 
-    $has_secure_requests = false;
-    foreach ($requests as $index => &$request) {
-        $request['index'] = $index;
-        $request['number'] = $index + 1;
-        if (@$request['body'])
-            $request['body_url'] = "/response_body.php?test=$id&run=$run&cached=$is_cached&request={$request['number']}";
-        if ($request['is_secure'])
-            $has_secure_requests = true;
-        if (isset($custom_rules) && is_array($custom_rules) && array_key_exists($index + 1, $custom_rules))
-            $request['custom_rules'] = $custom_rules[$index + 1];
+    if (isset($requests) && is_array($requests)) {
+      $has_secure_requests = false;
+      foreach ($requests as $index => &$request) {
+          $request['index'] = $index;
+          $request['number'] = $index + 1;
+          if ($rootUrlGenerator) {
+            if (isset($request['body_id']) && strlen($request['body_id'])) {
+              $request['body_url'] = $rootUrlGenerator->responseBodyWithBodyId($request['body_id']);
+            } elseif (isset($request['body']) && @$request['body']) {
+              $request['body_url'] = $rootUrlGenerator->responseBodyWithRequestNumber($request['number']);
+            }
+          }
+          if (!$has_secure_requests && isset($request['is_secure']) && $request['is_secure'])
+              $has_secure_requests = true;
+      }
+
+      if (!$cached && $use_raw_headers) {
+        gz_file_put_contents($cache_file, json_encode($requests));
+      }
     }
-    
-    // this is disabled for right now - there were indications that it was
-    // spiking CPU to 100% on WPT so there may be a loop condition of some kind
-    //BuildRequestDependencies($requests);
-    
+
     return $requests;
 }
 
@@ -123,7 +158,7 @@ function CalculateComponentTimes(&$pageData, &$requests) {
 }
 
 /**
-* Load the gzipped request file (tab deliminated).
+* Load the gzipped request file (tab-delimited).
 */
 function LoadRequests($request_file_name) {
     $requests = array();
@@ -180,6 +215,19 @@ function LoadRequests($request_file_name) {
         72 => 'server_rtt',
         73 => 'client_port',
         74 => 'jpeg_scan_count',
+        75 => 'priority',
+        76 => 'request_id',
+        77 => 'was_pushed',
+        78 => 'initiator_type',
+        79 => 'initiator_function',
+        80 => 'initiator_detail',
+        81 => 'protocol',
+        82 => 'http2_stream_id',
+        83 => 'http2_stream_dependency',
+        84 => 'http2_stream_weight',
+        85 => 'http2_stream_exclusive',
+        86 => 'certificate_bytes',
+        87 => 'objectSizeUncompressed'
         );
     $request_lines = gz_file($request_file_name);
     if( isset($request_lines) && is_array($request_lines)) {
@@ -189,8 +237,14 @@ function LoadRequests($request_file_name) {
             if (count($columns)) {
                 $request = array();
                 foreach ($columns as $i => $value) {
-                    if (array_key_exists($i + 1, $needed_columns) && strlen(trim($value)))
-                        $request[$needed_columns[$i + 1]] = trim($value);
+                    $trimmed_value = trim($value);
+                    if (isset($needed_columns[$i + 1]) && strlen($trimmed_value)) {
+                        if (is_numeric($trimmed_value)) {
+                            $request[$needed_columns[$i + 1]] = $trimmed_value + 0;
+                        } else {
+                            $request[$needed_columns[$i + 1]] = $trimmed_value;
+                        }
+                    }
                 }
                 if (array_key_exists('host', $request) && array_key_exists('url', $request)) {
                     $url = 'http://';
@@ -220,64 +274,6 @@ function LoadRequests($request_file_name) {
 }
 
 /**
-* Map IP addresses to country, countryCode, city, region, lat, and long.
-*/
-function AddLocationData(&$requests) {
-    $has_locations = false;
-    $geo_ip = null;
-    try {
-      if (is_file('./Net/GeoLiteCity.dat')) {
-        require_once('./Net/GeoIP.php');
-        $geo_ip = Net_GeoIP::getInstance(
-            './Net/GeoLiteCity.dat', Net_GeoIP::MEMORY_CACHE);
-      }
-    } catch(Exception $e) { }
-
-    if (isset($geo_ip)) {
-        foreach($requests as &$request) {
-            if (array_key_exists('cdn_provider', $request) && 
-                strlen($request['cdn_provider'])) {
-                $request['location'] = $request['cdn_provider'];
-            } elseif (array_key_exists('cdn_score', $request) && 
-                      $request['cdn_score'] == 100) {
-                $request['location'] = 'CDN';
-            } elseif ($request['ip_addr']) {
-                try {
-                    $location = $geo_ip->lookupLocation($request['ip_addr']);
-                    if ($location) {
-                        $has_locations = true;
-                        $request['country'] = $location->countryName;
-                        $request['countryCode'] = $location->countryCode3;
-                        $request['city'] = $location->city;
-                        $request['region'] = $location->region;
-                        $request['lat'] = $location->latitude;
-                        $request['long'] = $location->longitude;
-
-                        $loc = '-';
-                        if ($request['city']) {
-                            if ($request['region'] &&
-                                $request['countryCode'] == 'USA') {
-                                $loc = $request['city'] . ', ' . $request['region'];
-                            } elseif ($request['country']) {
-                                $loc = $request['city'] . ', ' . $request['country'];
-                            }
-                        } elseif ($request['region']) {
-                            if ($request['country']) {
-                                $loc = $request['region'] . ', ' . $request['country'];
-                            }
-                        } elseif ($request['country']) {
-                            $loc = $request['country'];
-                        }
-                        $request['location'] = $loc;
-                    }
-                } catch(Exception $e) {}
-            }
-        }
-    }
-    return $has_locations;
-}
-
-/**
 * Convert old format for DNS/connection data.
 */
 function MergeDnsAndConnectionTimes($requests) {
@@ -286,6 +282,7 @@ function MergeDnsAndConnectionTimes($requests) {
     $dns_ms = null;
     $connect_ms = null;
     foreach($requests as $i => &$request) {
+      if (isset($request['type'])) {
         $request_type = (int)$request['type'];
         if ($request_type == 1) {
             $dns_ms = $request['load_ms'];
@@ -302,13 +299,16 @@ function MergeDnsAndConnectionTimes($requests) {
             unset($connect_ms);
             $merged_requests[] = $request;
         }
+      } else {
+        $merged_requests[] = $request;
+      }
     }
   }
   return $merged_requests;
 }
 
 /**
- * Compute consistent request time fields.
+ * Compute consistent request-time fields.
  *
  * Field keys:
  *   all      - Includes all activity (e.g. dns through download).
@@ -329,8 +329,8 @@ function MergeDnsAndConnectionTimes($requests) {
 function FixUpRequestTimes(&$requests) {
     $requests = MergeDnsAndConnectionTimes($requests);
     foreach($requests as &$req) {
-        $all_start = $req['load_start'];
-        $all_ms = $req['load_ms'];
+        $all_start = isset($req['load_start']) ? $req['load_start'] : 0;
+        $all_ms = isset($req['load_ms']) ? $req['load_ms'] : 0;
 
         foreach (array('ssl', 'connect', 'dns') as $key) {
             $start = $end = $ms = 0;
@@ -358,7 +358,7 @@ function FixUpRequestTimes(&$requests) {
             $req[$key . '_end'] = $end;
             $req[$key . '_ms'] = $ms;
         }
-        $req['load_end'] = $req['load_start'] + $req['load_ms'];
+        $req['load_end'] = (isset($req['load_start']) && isset($req['load_ms'])) ? ($req['load_start'] + $req['load_ms']) : 0;
 
         // iOS agents do not have any way to get the time to first byte,
         // so it may be unset.  In that case, treat the entire time from
@@ -367,17 +367,17 @@ function FixUpRequestTimes(&$requests) {
         // this logic.
         $ttfb_ms = isset($req['ttfb_ms']) ? $req['ttfb_ms'] : 0;
 
-        $req['ttfb_start'] = $req['load_start'];
-        $req['ttfb_end'] = $req['ttfb_start'] + $req['ttfb_ms'];
+        $req['ttfb_start'] = isset($req['load_start']) ? $req['load_start'] : 0;
+        $req['ttfb_end'] = (isset($req['ttfb_start']) && isset($req['ttfb_ms'])) ? ($req['ttfb_start'] + $req['ttfb_ms']) : 0;
 
         // The download state starts when TTFB ends, and stops when loading
         // is done.
-        $req['download_start'] = $req['load_start'] + $ttfb_ms;
-        $req['download_end'] = $req['load_end'];
+        $req['download_start'] = isset($req['load_start']) ? $req['load_start'] + $ttfb_ms : 0;
+        $req['download_end'] = isset($req['load_end']) ? $req['load_end'] : 0;
         $req['download_ms'] = $req['download_end'] - $req['download_start'];
 
         $req['all_start'] = $all_start;
-        $req['all_end'] = $req['load_end'];
+        $req['all_end'] = isset($req['load_end']) ? $req['load_end'] : 0;
         $req['all_ms'] = $all_ms;
     }
 }
@@ -385,8 +385,9 @@ function FixUpRequestTimes(&$requests) {
 /**
 * Helper for AddHeaders to initialize variables.
 */
-function _AddHeadersInit(&$index, &$headers, &$headers_key) {
+function _AddHeadersInit(&$id, &$index, &$headers, &$headers_key) {
     $index = null;
+    $id = null;
     $headers = array('request' => array(), 'response' => array());
     $headers_key = null;
 }
@@ -394,11 +395,22 @@ function _AddHeadersInit(&$index, &$headers, &$headers_key) {
 /**
 * Helper for AddHeaders to save headers.
 */
-function _AddHeadersSave(&$requests, &$index, &$headers) {
-    if ((count($headers['request']) || count($headers['response'])) &&
-        array_key_exists($index, $requests)) {
-        $requests[$index]['headers'] = $headers;
+function _AddHeadersSave(&$requests, $index, $id, $headers) {
+  if (isset($id) && $id > 0) {
+    // use the request ID to find the real index of the request
+    foreach ($requests as $i => $request) {
+      if (isset($request['request_id']) && $request['request_id'] == $id) {
+        $index = $i;
+        break;
+      }
     }
+  }
+  if (isset($index)) {
+    if ((count($headers['request']) || count($headers['response'])) &&
+      array_key_exists($index, $requests)) {
+      $requests[$index]['headers'] = $headers;
+    }
+  }
 }
 
 /**
@@ -408,7 +420,7 @@ function AddHeaders(&$requests, $headers_file_name) {
     $header_lines = gz_file($headers_file_name);
     if ($header_lines) {
         $is_started = false;
-        _AddHeadersInit($index, $headers, $headers_key);
+        _AddHeadersInit($index, $id, $headers, $headers_key);
         foreach ($header_lines as &$line) {
             $trimmed = trim($line);
             if (!$is_started) {
@@ -418,21 +430,25 @@ function AddHeaders(&$requests, $headers_file_name) {
                     $headers_key = 'request';
                 } elseif ($trimmed == 'Response Headers:' && isset($index)) {
                     $headers_key = 'response';
+                } elseif (!strncmp($line, 'RID:', 4)) {
+                    $line_parts = explode(' ', $line);
+                    $request_id = intval($line_parts[1]);
+                    if ($request_id > 0)
+                        $id = $request_id;
                 } elseif (!strncmp($line, 'Request ', 8)) {
-                    _AddHeadersSave($requests, $index, $headers);
-                    _AddHeadersInit($index, $headers, $headers_key);
+                    _AddHeadersSave($requests, $index, $id, $headers);
+                    _AddHeadersInit($index, $id, $headers, $headers_key);
 
                     $line_parts = explode(' ', $line);
                     $request_num = intval($line_parts[1]);
-                    if ($request_num > 0) {
+                    if ($request_num > 0)
                         $index = $request_num - 1;
-                    }
                 } elseif (strlen($trimmed) && isset($headers_key)) {
                     $headers[$headers_key][] = $trimmed;
                 }
             }
         }
-        _AddHeadersSave($requests, $index, $headers);
+        _AddHeadersSave($requests, $index, $id, $headers);
     }
 }
 
@@ -440,17 +456,86 @@ function AddHeaders(&$requests, $headers_file_name) {
 *  Flag the requests that have a response body available.
 */
 function AddResponseBodyFlags(&$requests, $bodies_file_name) {
-    if (is_file($bodies_file_name)) {
-        $zip = new ZipArchive;
-        if ($zip->open($bodies_file_name) === TRUE) {
-            for ($i = 0; $i < $zip->numFiles; $i++) {
-                $index = intval($zip->getNameIndex($i), 10);
-                if ($index && array_key_exists($index - 1, $requests)) {
-                    $requests[$index - 1]['body'] = true;
-                }
+  if (is_file($bodies_file_name)) {
+    // build a list of all of the file names in the bodies zip
+    $ids = array();
+
+    $zip = new ZipArchive;
+    if ($zip->open($bodies_file_name) === TRUE) {
+      for ($i = 0; $i < $zip->numFiles; $i++) {
+        $name = $zip->getNameIndex($i);
+        $first = strpos($name, '-');
+        $found = false;
+        if ($first > 0) {
+          $last = strrpos($name, '-body.txt');
+          if ($last > $first) {
+            $id = substr($name, $first + 1, $last - $first - 1);
+            if (strlen($id)) {
+              $ids[$id] = $id;
+              $found = true;
             }
+          }
         }
+        if (!$found) {
+          // old-style where the files are numbered in order of request
+          $index = intval($name, 10);
+          if ($index && array_key_exists($index - 1, $requests)) {
+            $requests[$index - 1]['body'] = true;
+          }
+        }
+      }
+      $zip->close();
     }
+
+    // match the bodies with the requests
+    if (count($ids)) {
+      foreach ($requests as &$request) {
+        if ( isset($request['raw_id']) && isset($ids[trim($request['raw_id'])]) ) {
+          $request['body_id'] = $ids[trim($request['raw_id'])];
+        } elseif (isset($request['request_id']) && isset($ids[trim($request['request_id'])])) {
+          $request['body_id'] = $ids[trim($request['request_id'])];
+        }
+      }
+    }
+  }
+}
+
+function AddScriptTimings(&$requests, $script_timing_file_name) {
+  if (gz_is_file($script_timing_file_name)) {
+    $timings = json_decode(gz_file_get_contents($script_timing_file_name), true);
+    if (isset($timings) &&
+        is_array($timings) &&
+        isset($timings['main_thread']) &&
+        isset($timings[$timings['main_thread']])) {
+      $js_timing = $timings[$timings['main_thread']];
+      // Only allocate the JS timings to the first occurence of a given URL
+      $used = array();
+      foreach ($requests as &$request) {
+        if (isset($request['full_url']) && isset($js_timing[$request['full_url']]) && !isset($used[$request['full_url']])) {
+          $used[$request['full_url']] = true;
+          $all_total = 0.0;
+          foreach ($js_timing[$request['full_url']] as $cpu_event => $times) {
+            $total = 0.0;
+            foreach ($times as $pair) {
+              $elapsed = $pair[1] - $pair[0];
+              if ($elapsed > 0)
+                $total += $elapsed;
+            }
+            if ($total > 0) {
+              $all_total += $total;
+              $total = intval(round($total));
+              if (!isset($request['cpuTimes']))
+                $request['cpuTimes'] = array();
+              $request['cpuTimes'][$cpu_event] = $total;
+              $request["cpu.$cpu_event"] = $total;
+            }
+          }
+          $all_total = intval(round($all_total));
+          $request['cpuTime'] = $all_total;
+        }
+      }
+    }
+  }
 }
 
 /**
@@ -471,7 +556,7 @@ function GetBasePage(&$requests) {
 
 /**
 * Build the list of dependencies for each request
-* 
+*
 * @param mixed $requests
 */
 function BuildRequestDependencies(&$requests) {
@@ -481,13 +566,13 @@ function BuildRequestDependencies(&$requests) {
         $request['loaded_by'] = array();
         RequestLoadedBy($request['number'], $requests, $request['loaded_by']);
     }
-    
+
     return $dependencies;
 }
 
 /**
-* Figure out all of the resources loaded by the given resource
-* 
+* Figure out all of the resources loaded by the given requests
+*
 * @param mixed $index
 * @param mixed $requests
 * @param mixed $map
@@ -515,8 +600,8 @@ function RequestLoads($request_number, &$requests, &$entry) {
 }
 
 /**
-* Figure out all of the resources required to load the given resource
-* 
+* Figure out all of the resources required to load the given requests
+*
 * @param mixed $index
 * @param mixed $requests
 * @param mixed $map

@@ -1,6 +1,7 @@
 <?php
-
-require_once('lib/PHPStats/PHPStats.phar');
+// Copyright 2020 Catchpoint Systems Inc.
+// Use of this source code is governed by the Polyform Shield 1.0.0 license that can be
+// found in the LICENSE.md file.
 
 /**
  * ConfData is a class describing basic statistics for a labeled dataset:
@@ -24,12 +25,17 @@ class ConfData {
    * fromArr constructs a ConfData object from a label and array of values.
    */
   static function fromArr($label, $arr) {
-    $n = count($arr);
-    $mean = array_sum($arr) / count($arr);
-    $se = \PHPStats\Stats::sampleStddev($arr) / sqrt(count($arr));
-    $tDist = new \PHPStats\ProbabilityDistribution\StudentsT(count($arr) - 1);
-    $criticalValue = $tDist->ppf(.975);
-    return new ConfData($label, $n, $mean, $criticalValue * $se);
+    if (is_file('lib/PHPStats/PHPStats.phar')) {
+      require_once('lib/PHPStats/PHPStats.phar');
+      $n = count($arr);
+      $mean = array_sum($arr) / count($arr);
+      $se = \PHPStats\Stats::sampleStddev($arr) / sqrt(count($arr));
+      $tDist = new \PHPStats\ProbabilityDistribution\StudentsT(count($arr) - 1);
+      $criticalValue = $tDist->ppf(.975);
+      return new ConfData($label, $n, $mean, $criticalValue * $se);
+    } else {
+      return FALSE;
+    }
   }
 }
 ?>

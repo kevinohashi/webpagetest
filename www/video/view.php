@@ -1,10 +1,23 @@
 <?php
+// Copyright 2020 Catchpoint Systems Inc.
+// Use of this source code is governed by the Polyform Shield 1.0.0 license that can be
+// found in the LICENSE.md file.
 chdir('..');
+if( array_key_exists('embed', $_REQUEST) && $_REQUEST['embed'] )
+{
+  $ALLOW_IFRAME = true;
+}
 include 'common.inc';
-$videoId = $_REQUEST['id'];
+require_once('archive.inc');
+if (isset($_REQUEST['id']) && !preg_match('/^[\w\.\-_]+$/', $_REQUEST['id'])) {
+  header("HTTP/1.0 404 Not Found");
+  die();
+}
+$videoId = isset($_REQUEST['id']) ? htmlspecialchars($_REQUEST['id']) : null;
 $valid = false;
 $done = false;
 $embed = false;
+$dir = null;
 if( array_key_exists('embed', $_REQUEST) && $_REQUEST['embed'] )
 {
     $embed = true;
@@ -14,21 +27,19 @@ if( array_key_exists('embed', $_REQUEST) && $_REQUEST['embed'] )
 $color = 'white';
 $bgcolor = "black";
 $lightcolor = '#777';
-$displayData = false;
-if (array_key_exists('data', $_REQUEST) && $_REQUEST['data']) {
-  $bgcolor = 'white';
-  $color = "black";
-  $displayData = true;
-}
 if (array_key_exists('bgcolor', $_REQUEST))
-    $bgcolor = $_REQUEST['bgcolor'];
+    $bgcolor = htmlspecialchars($_REQUEST['bgcolor']);
+elseif (array_key_exists('bg', $_REQUEST))
+    $bgcolor = htmlspecialchars('#' . $_REQUEST['bg']);
 if (array_key_exists('color', $_REQUEST))
-    $color = $_REQUEST['color'];
+    $color = htmlspecialchars($_REQUEST['color']);
+elseif (array_key_exists('text', $_REQUEST))
+    $color = htmlspecialchars('#' . $_REQUEST['text']);
 $autoplay = 'false';
 if (array_key_exists('autoplay', $_REQUEST) && $_REQUEST['autoplay'])
     $autoplay = 'true';
 
-$page_keywords = array('Video','comparison','Webpagetest','Website Speed Test');
+$page_keywords = array('Video','comparison','WebPageTest','Website Speed Test');
 $page_description = "Side-by-side video comparison of website performance.";
 
 $xml = false;
@@ -41,56 +52,88 @@ if( array_key_exists('f', $_REQUEST)) {
 }
 
 $ini = null;
-$title = "WebPagetest - Visual Comparison";
+$title = "WebPageTest - Visual Comparison";
 
-$dir = GetVideoPath($videoId, true);
-if( is_dir("./$dir") )
-{
-    $valid = true;
-    if (is_file("./$dir/video.mp4") || is_file("./$dir/video.ini")) {
-        $ini = parse_ini_file("./$dir/video.ini");
-        if( is_file("./$dir/video.mp4") || isset($ini['completed']) )
-        {
-            $done = true;
-            GenerateVideoThumbnail("./$dir");
-        }
-    }
-    
-    // get the video time
-    $date = gmdate("M j, Y", filemtime("./$dir"));
-    if( is_file("./$dir/video.mp4")  )
-        $date = gmdate("M j, Y", filemtime("./$dir/video.mp4"));
-    $title .= " - $date";
+if (isset($videoId)) {
+  RestoreVideoArchive($videoId);
+  $dir = GetVideoPath($videoId, true);
+  if( is_dir("./$dir") )
+  {
+      $valid = true;
+      $protocol = getUrlProtocol();
+      $host  = $_SERVER['HTTP_HOST'];
+      $uri   = rtrim(dirname($_SERVER['PHP_SELF']), '/\\');
+      $videoUrl = "$protocol://$host$uri/download.php?id=$videoId";
+      $embedUrl = "$protocol://$host$uri/view.php?embed=1&id=$videoId";
 
-    $labels = json_decode(file_get_contents("./$dir/labels.txt"), true);
-    if( count($labels) )
-    {
-        $title .= ' : ';
-        foreach($labels as $index => $label)
-        {
-            if( $index > 0 )
-                $title .= ", ";
-            $title .= $label;
-        }
+      if (is_file("./$dir/video.mp4") || is_file("./$dir/video.ini")) {
+          $ini = parse_ini_file("./$dir/video.ini");
+          if( is_file("./$dir/video.mp4") || isset($ini['completed']) )
+          {
+              $done = true;
+              GenerateVideoThumbnail("./$dir");
+          }
+      }
+
+      // get the video time
+      $date = gmdate("M j, Y", filemtime("./$dir"));
+      if( is_file("./$dir/video.mp4")  )
+          $date = gmdate("M j, Y", filemtime("./$dir/video.mp4"));
+      $title .= " - $date";
+
+      $labels = json_decode(file_get_contents("./$dir/labels.txt"), true);
+      if( count($labels) )
+      {
+          $title .= ' : ';
+          foreach($labels as $index => $label)
+          {
+              if( $index > 0 )
+                  $title .= ", ";
+              $title .= $label;
+          }
+      }
+
+      $location = null;
+      if (gz_is_file("./$dir/testinfo.json")) {
+          $tests = json_decode(gz_file_get_contents("./$dir/testinfo.json"), true);
+          if (is_array($tests) && count($tests)) {
+              foreach($tests as &$test) {
+                  if (array_key_exists('location', $test)) {
+                      if (!isset($location)) {
+                          $location = $test['location'];
+                      } elseif ($location != $test['location']) {
+                          $location = '';
+                      }
+                  } else {
+                      $location = '';
+                  }
+              }
+          }
+      }
+  }
+} elseif (isset($_REQUEST['tests'])) {
+  // Generate the video and poster dynamically
+  $location = isset($_REQUEST['loc']) ? htmlspecialchars(strip_tags($_REQUEST['loc'])) : null;
+  $protocol = getUrlProtocol();
+  $host  = $_SERVER['HTTP_HOST'];
+  $hostname = GetSetting('host');
+  if (isset($hostname) && is_string($hostname) && strlen($hostname)) {
+      $host = $hostname;
+  }
+  $uri   = rtrim(dirname($_SERVER['PHP_SELF']), '/\\');
+  $params = 'tests=' . htmlspecialchars($_REQUEST['tests']);
+  $validParams = array('bg', 'text', 'end', 'labelHeight', 'timeHeight', 'slow');
+  foreach ($validParams as $p) {
+    if (isset($_REQUEST[$p])) {
+      $params .= "&$p=" . htmlspecialchars($_REQUEST[$p]);
     }
-    
-    $location = null;
-    if (gz_is_file("./$dir/testinfo.json")) {
-        $tests = json_decode(gz_file_get_contents("./$dir/testinfo.json"), true);
-        if (is_array($tests) && count($tests)) {
-            foreach($tests as &$test) {
-                if (array_key_exists('location', $test)) {
-                    if (!isset($location)) {
-                        $location = $test['location'];
-                    } elseif ($location != $test['location']) {
-                        $location = '';
-                    }
-                } else {
-                    $location = '';
-                }
-            }
-        }
-    }
+  }
+  $videoUrl = "$protocol://$host$uri/video.php?$params";
+  $imagePreview = "$protocol://$host$uri/video.php?$params&format=gif";
+  $posterUrl = "$protocol://$host$uri/poster.php?$params";
+  $embedUrl = "$protocol://$host$uri/view.php?embed=1&$params";
+  $valid = true;
+  $done = true;
 }
 
 if( $xml || $json )
@@ -101,12 +144,6 @@ if( $xml || $json )
         if( $done )
         {
             $code = 200;
-
-            $protocol = ((isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] == 'on') || (isset($_SERVER['HTTP_SSL']) && $_SERVER['HTTP_SSL'] == 'On')) ? 'https' : 'http';
-            $host  = $_SERVER['HTTP_HOST'];
-            $uri   = rtrim(dirname($_SERVER['PHP_SELF']), '/\\');
-            $videoUrl = "$protocol://$host$uri/download.php?id=$videoId";
-            $embedUrl = "$protocol://$host$uri/view.php?embed=1&id=$videoId";
         }
         else
             $code = 100;
@@ -126,9 +163,10 @@ if( $xml )
     echo "<statusCode>$code</statusCode>\n";
     echo "<statusText>$error</statusText>\n";
     if( strlen($_REQUEST['r']) )
-        echo "<requestId>{$_REQUEST['r']}</requestId>\n";
+        echo "<requestId>" . htmlspecialchars($_REQUEST['r']) . "</requestId>\n";
     echo "<data>\n";
-    echo "<videoId>$videoId</videoId>\n";
+    if (isset($videoId))
+      echo "<videoId>$videoId</videoId>\n";
     if( strlen($videoUrl) )
         echo '<videoUrl>' . htmlspecialchars($videoUrl) . '</videoUrl>\n';
     echo "</data>\n";
@@ -140,12 +178,13 @@ elseif( $json )
     $ret['statusCode'] = $code;
     $ret['statusText'] = $error;
     $ret['data'] = array();
-    $ret['data']['videoId'] = $videoId;
+    if (isset($videoId))
+      $ret['data']['videoId'] = $videoId;
     if( strlen($videoUrl) )
         $ret['data']['videoUrl'] = $videoUrl;
     if (strlen($embedUrl)) {
         $ret['data']['embedUrl'] = $embedUrl;
-        if (is_file("./$dir/video.png")) {
+        if (isset($dir) && is_file("./$dir/video.png")) {
             list($width, $height) = getimagesize("./$dir/video.png");
             $ret['data']['width'] = $width;
             $ret['data']['height'] = $height;
@@ -157,7 +196,7 @@ else
 {
 ?>
 <!DOCTYPE html>
-<html>
+<html lang="en-us">
     <head>
         <title><?php echo $title;?></title>
         <?php
@@ -169,20 +208,25 @@ else
             <noscript>
             <meta http-equiv="refresh" content="10" />
             </noscript>
-            <script language="JavaScript">
+            <script>
             setTimeout( "window.location.reload(true)", 10000 );
             </script>
             <?php
         }
         ?>
-        <?php 
+        <?php
             if( !$embed )
             {
-                $gaTemplate = 'Video'; 
-                include ('head.inc'); 
+                $gaTemplate = 'Video';
+                include ('head.inc');
+            }
+            if (isset($videoUrl)) {
+              echo '<meta property="og:video" content="' . htmlspecialchars($videoUrl) . '" />';
+            }
+            if (isset($imagePreview)) {
+              echo '<meta property="og:image" content="' . htmlspecialchars($imagePreview) . '" />';
             }
         ?>
-        <link rel="stylesheet" href="/video/video-js.3.2.0/video-js.min.css" type="text/css">
         <style type="text/css">
             .content h2 {
                 font-size: 1.5em;
@@ -194,19 +238,13 @@ else
             {
                 text-align:center;
                 <?php
-                echo "background-color: $bgcolor;\n";
-                echo "color: $color;\n";
+                echo "background-color: " . htmlspecialchars($bgcolor) . ";\n";
+                echo "color: " . htmlspecialchars($color) . ";\n";
                 ?>
                 font-family: arial,sans-serif;
                 padding: 0px 25px;
             }
-            .link
-            {
-                text-decoration: underline;
-                <?php
-                echo "color: $color;\n";
-                ?>
-            }
+
             #player
             {
                 margin-left: auto;
@@ -220,8 +258,8 @@ else
             #embed
             {
                 <?php
-                    echo "background: $bgcolor;\n";
-                    echo "color: $color;\n"
+                    echo "background: " . htmlspecialchars($bgcolor) . ";\n";
+                    echo "color: " . htmlspecialchars($color) . ";\n"
                 ?>
                 font-family: arial,sans-serif;
                 padding: 20px;
@@ -245,39 +283,37 @@ else
               clear: both;
               float: right;
               <?php
-              echo "color: $lightcolor;\n";
+              echo "color: " . htmlspecialchars($lightcolor) . ";\n";
               ?>
             }
             #testmode a.link
             {
               <?php
-              echo "color: $lightcolor;\n";
+              echo "color: " . htmlspecialchars($lightcolor) . ";\n";
               ?>
             }
-            .vjs-default-skin .vjs-controls {height: 0;}
-            .vjs-default-skin .vjs-mute-control {display: none;}
-            .vjs-default-skin .vjs-volume-control {display: none;}
             <?php
             if( $embed )
-                echo "body {background-color: $bgcolor; margin:0; padding: 0;}";
+                echo "body {background-color: " . htmlspecialchars($bgcolor) . "; margin:0; padding: 0;}";
             ?>
         </style>
-        <script type="text/javascript" src="/video/video-js.3.2.0/video.min.js"></script>
         <script type="text/javascript">
             function ShowEmbed() {
                 $("#embed").modal({opacity:80});
             }
         </script>
     </head>
-    <body>
-        <div class="page">
+    <body <?php if ($COMPACT_MODE) {echo 'class="compact"';} ?>>
             <?php
             if( !$embed ) {
                 $tab = '';
                 $nosubheader = true;
                 include 'header.inc';
             }
+?>
+            <div class="box">
 
+<?php
             if( $valid && ($done || $embed) )
             {
                 if (!$embed) {
@@ -285,15 +321,13 @@ else
                     echo "<div id=\"location\">Tested From: $location</div>";
                   if (array_key_exists('label', $_REQUEST) && strlen($_REQUEST['label']))
                     echo "<h2>" . htmlspecialchars($_REQUEST['label']) . "</h2>\n";
-                  if ($displayData)
-                    DisplayData();
                 }
 
                 $width = 800;
                 $height = 600;
 
                 $hasThumb = false;
-                if( is_file("./$dir/video.png") )
+                if( isset($dir) && is_file("./$dir/video.png") )
                 {
                     $hasThumb = true;
                     list($width, $height) = getimagesize("./$dir/video.png");
@@ -304,52 +338,26 @@ else
                 if( array_key_exists('height', $_REQUEST) && $_REQUEST['height'] )
                     $height = (int)$_REQUEST['height'];
 
-                echo "<script>\n";
-                if (array_key_exists('html', $_REQUEST) && $_REQUEST['html'])
-                    echo "_V_.options.techOrder = ['html5', 'flash'];\n";
-                else
-                    echo "_V_.options.techOrder = ['flash', 'html5'];\n";
-                echo "_V_.options.flash.swf = '/video/player/flowplayer-3.2.16.swf';\n";
-                echo "_V_.options.flash.flashVars = {config:\"{";
-                echo "'clip':{'scaling':'fit'},";
-                echo "'plugins':{'controls':{'volume':false,'mute':false,'stop':true,'tooltips':{'buttons':true,'fullscreen':'Enter fullscreen mode'}}},";
-                echo "'canvas':{'backgroundColor':'#000000','backgroundGradient':'none'},";
-                if ($hasThumb) {
-                    echo "'playlist':[{'url':'/$dir/video.png'},{'url':'/$dir/video.mp4','autoPlay':$autoplay,'autoBuffering':false}]";
-                } else {
-                    echo "'playlist':[{'url':'/$dir/video.mp4','autoPlay':$autoplay,'autoBuffering':true}]";
-                }
-                echo "}\"};\n";
-                echo "_V_.options.flash.params = {
-                       allowfullscreen: 'true',
-                       wmode: 'transparent',
-                       allowscriptaccess: 'always'
-                   };
-                   _V_.options.flash.attributes={};\n";
-                echo "</script>\n";
-                    
-                echo "<video id=\"player\" class=\"video-js vjs-default-skin\" controls
-                  preload=\"auto\" width=\"$width\" height=\"$height\"";
-                if ($hasThumb) {
-                    echo " poster=\"/$dir/video.png\"";
-                }
-                echo "data-setup=\"{}\">
-                    <source src=\"/$dir/video.mp4\" type='video/mp4'>
+                $poster = "";
+                if (isset($posterUrl))
+                  $poster = "poster=\"$posterUrl\"";
+                elseif ($hasThumb)
+                  $poster = "poster=\"/$dir/video.png\"";
+                if (isset($dir))
+                  $videoUrl = "/$dir/video.mp4";
+                echo "<video id=\"player\" controls muted
+                       preload=\"auto\" $poster>
+                    <source src=\"$videoUrl\" type='video/mp4'>
                 </video>";
 
                 if(!$embed) {
-                    echo "<br><a class=\"link\" href=\"/video/download.php?id=$videoId\">Download</a> | ";
-                    echo '<a class="link" href="javascript:ShowEmbed()">Embed</a>';
-                    $protocol = ((isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] == 'on') || (isset($_SERVER['HTTP_SSL']) && $_SERVER['HTTP_SSL'] == 'On')) ? 'https' : 'http';
-                    $dataText = 'View as data comparison';
-                    $dataUrl = "$protocol://{$_SERVER['HTTP_HOST']}{$_SERVER['PHP_SELF']}?id=$videoId&data=1";
-                    if ($displayData) {
-                      $dataText = 'View as video';
-                      $dataUrl = "$protocol://{$_SERVER['HTTP_HOST']}{$_SERVER['PHP_SELF']}?id=$videoId";
+                    if (isset($videoId)) {
+                      echo "<br><a class=\"link\" href=\"$videoUrl\">Download</a>";
+                      echo ' | <a class="link" href="javascript:ShowEmbed()">Embed</a><br>&nbsp;';
+                    } else {
+                      echo "<br><a class=\"link\" href=\"$videoUrl\">Video File</a>";
+                      echo " | <a class=\"link\" href=\"$videoUrl&format=gif\">Animated Gif</a><br>&nbsp;";
                     }
-                    if (defined('BARE_UI'))
-                      $dataUrl .= '&bare=1';
-                    echo "<div class=\"cleared\"></div><div id=\"testmode\"><a class=\"link\" href=\"$dataUrl\">$dataText</a></div>";
                 }
             }
             elseif( $valid && !$embed )
@@ -359,17 +367,38 @@ else
             else
                 echo '<h1>The requested video does not exist.  Please try creating it again and if the problem persists please contact us.</h1>';
             ?>
-            
-            <?php 
+</div>
+            <?php
                 if (!$embed)
-                    include('footer.inc'); 
+                    include('footer.inc');
             ?>
         </div>
+        <script>
+          var video = document.getElementById('player');
+          var started = false;
+          video.addEventListener('click',function(){
+              video.paused ? video.play() : video.pause();
+          },false);
+          video.addEventListener('mouseenter',function(){
+            if (started) {
+              video.setAttribute("controls","controls");
+            }
+          },false);
+          video.addEventListener('mouseleave',function(){
+            if (started) {
+              video.removeAttribute("controls");
+            }
+          },false);
+          video.addEventListener('play',function(){
+            started = true;
+            video.removeAttribute("controls");
+          },false);
+        </script>
         <div id="embed" style="display:none;">
             <h3>Video Embed</h3>
-            <p>Copy and past the code below into a website to embed the video.</p>  
-            <p>You can adjust the size of the video as necessary by changing the 
-            width and height parameters<br>(make sure to change both the parameters on 
+            <p>Copy and past the code below into a website to embed the video.</p>
+            <p>You can adjust the size of the video as necessary by changing the
+            width and height parameters<br>(make sure to change both the parameters on
             the src URL and the iFrame).</p>
             <p id="embed-code">
             <?php
@@ -379,7 +408,7 @@ else
               $dimensions = "&width=$width&height=$height";
               $framesize = " width=\"$width\" height=\"$height\"";
             }
-            $protocol = ((isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] == 'on') || (isset($_SERVER['HTTP_SSL']) && $_SERVER['HTTP_SSL'] == 'On')) ? 'https' : 'http';
+            $protocol = getUrlProtocol();
             echo htmlspecialchars("<iframe src=\"$protocol://{$_SERVER['HTTP_HOST']}{$_SERVER['PHP_SELF']}?id=$videoId&embed=1$dimensions\"$framesize></iframe>");
             ?>
             </p>
@@ -390,86 +419,3 @@ else
 
 <?php
 }
-
-function DisplayData() {
-  global $tests;
-  $metrics = array('loadTime' => 'Page Load Time',
-                   'SpeedIndex' => '<a href="https://sites.google.com/a/webpagetest.org/docs/using-webpagetest/metrics/speed-index">Speed Index</a> (lower is better)');
-  echo '<br><table class="batchResults" border="1" cellpadding="15" cellspacing="0">
-          <tr>
-          <th class="empty"></th>';
-  foreach ($tests as &$test) {
-    RestoreTest($test['id']);
-    $label = '';
-    if (array_key_exists('label', $test))
-      $label = htmlspecialchars($test['label']);
-    echo "<th>$label</th>";
-  }
-  echo "</tr>\n";
-  foreach ($metrics as $metric => $label) {
-    echo "<tr><td class=\"right\"><b>$label</b></td>";
-    $base = null;
-    $index = 0;
-    foreach ($tests as &$test) {
-      $display = '';
-      $value = null;
-      if (array_key_exists('cached', $test) &&
-          array_key_exists('run', $test) &&
-          array_key_exists('pageData', $test) &&
-          is_array($test['pageData']) &&
-          array_key_exists($test['run'], $test['pageData']) &&
-          is_array($test['pageData'][$test['run']]) &&
-          array_key_exists($test['cached'], $test['pageData'][$test['run']]) &&
-          is_array($test['pageData'][$test['run']][$test['cached']]) &&
-          array_key_exists($metric, $test['pageData'][$test['run']][$test['cached']])) {
-        $value = htmlspecialchars($test['pageData'][$test['run']][$test['cached']][$metric]);
-        if ($metric == 'loadTime')
-          $display = number_format($value / 1000, 3) . 's';
-        else
-          $display = number_format($value, 0);
-      }
-      if (!$index)
-        $base = $value;
-      elseif(isset($base) && isset($value)) {
-        $delta = $value - $base;
-        $deltaPct = number_format(abs(($delta / $base) * 100), 1);
-        if ($metric == 'loadTime')
-          $deltaStr = number_format(abs($delta / 1000), 3) . 's';
-        else
-          $deltaStr = number_format(abs($delta), 0);
-        $deltaStr = htmlspecialchars("$deltaStr / $deltaPct%");
-        if ($delta > 0)
-          $display .= " <span class=\"bad\">(+$deltaStr)</span>";
-         elseif ($delta < 0)
-          $display .= " <span class=\"good\">(-$deltaStr)</span>";
-         else
-          $display .= "(No Change)";
-      }
-      echo "<td>$display</td>";
-      $index++;
-    }
-    echo "</tr>";
-  }
-  echo "<tr><td class=\"right\">Full Test Result</td>";
-  foreach ($tests as &$test) {
-    $img = '';
-    if (array_key_exists('id', $test)) {
-      if( FRIENDLY_URLS )
-        $result = "/result/{$test['id']}/";
-      else
-        $result = "/results.php?test={$test['id']}";
-      $cached = '';
-      if ($test['cached'])
-        $cached = '_Cached';
-      $thumbnail = "/thumbnail.php?test={$test['id']}&width=150&file={$test['run']}{$cached}_screen.jpg";
-      $img = "<a href=\"$result\"><img class=\"progress pimg\" src=\"$thumbnail\"><br>view test</a>";
-    }
-    echo "<td>$img</td>";
-  }
-  echo '</tr></table><br>';
-  $filmstrip = "/video/compare.php?tests=";
-  foreach ($tests as &$test)
-    $filmstrip .= urlencode("{$test['id']}-r:{$test['run']}-c:{$test['cached']}-l:{$test['label']}") . ',';
-  echo "<h2>Visual Comparison (<a href=\"$filmstrip\">view filmstrip comparison</a>)</h2>";
-}
-?>

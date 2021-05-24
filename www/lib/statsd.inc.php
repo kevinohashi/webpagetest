@@ -1,4 +1,7 @@
 <?php
+// Copyright 2020 Catchpoint Systems Inc.
+// Use of this source code is governed by the Polyform Shield 1.0.0 license that can be
+// found in the LICENSE.md file.
 /**
  * Send test result to a Statsd instance
  */
@@ -56,7 +59,7 @@ function StatsdPost($location, $browser, $label, $cached, &$metrics) {
   }
 }
 
-function graphite_key($location, $browser, $label, $cached, $metric) {
+function graphite_key($location, $browser, $label, $cached, $metric = '') {
   if (GetSetting('statsdCleanPattern')) {
     $label = preg_replace('/' . GetSetting('statsdPattern') . '/', '', $label);
   }

@@ -1,11 +1,14 @@
 <?php
+// Copyright 2020 Catchpoint Systems Inc.
+// Use of this source code is governed by the Polyform Shield 1.0.0 license that can be
+// found in the LICENSE.md file.
+require_once __DIR__ . '/../include/TestPaths.php';
 chdir('..');
 include 'common.inc';
 require_once('video.inc');
 
-$dir = "$testPath/video_$run";
-if( $cached )
-    $dir .= "_cached";
+$localPaths = new TestPaths($testPath, $run, $cached, $step);
+$dir = $localPaths->videoDir();
 $ok = false;
 
 if( is_dir($dir) )
@@ -13,7 +16,7 @@ if( is_dir($dir) )
     $file = "$dir/video.zip";
     BuildVideoScript($testPath, $dir);
     ZipVideo($dir);
-    
+
     if( is_file($file) )
     {
         header('Content-disposition: attachment; filename=video.zip');
@@ -28,9 +31,9 @@ if( !$ok )
 {
 ?>
 <!DOCTYPE html>
-<html>
+<html lang="en-us">
     <head>
-        <title>WebPagetest - Visual Comparison</title>
+        <title>WebPageTest - Visual Comparison</title>
         <meta http-equiv="charset" content="iso-8859-1">
         <?php $gaTemplate = 'Video Download Error'; include ('head.inc'); ?>
         <style type="text/css">
@@ -53,14 +56,14 @@ if( !$ok )
             }
         </style>
     </head>
-    <body>
+    <body <?php if ($COMPACT_MODE) {echo 'class="compact"';} ?>>
         <div class="page">
             <?php
             $tab = null;
             include 'header.inc';
             ?>
             <h1>The video requested does not exist.</h1>
-            
+
             <?php include('footer.inc'); ?>
         </div>
     </body>

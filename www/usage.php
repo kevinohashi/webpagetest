@@ -1,52 +1,99 @@
 <?php
+// Copyright 2020 Catchpoint Systems Inc.
+// Use of this source code is governed by the Polyform Shield 1.0.0 license that can be
+// found in the LICENSE.md file.
 include 'common.inc';
 set_time_limit(0);
-header('Content-Encoding: none;');
-
+$admin = true;
 // parse the logs for the counts
 $days = $_REQUEST['days'];
 if( !$days || $days > 1000 )
     $days = 7;
 
-$title = 'WebPagetest - Usage';
-
-include 'admin_header.inc';
+$title = 'WebPageTest - Usage';
+$json = false;
+if (isset($_REQUEST['f']) && $_REQUEST['f'] == 'json') {
+  $json = true;
+} else {
+  include 'admin_header.inc';
+}
 ?>
 
 <?php
     if( array_key_exists('k', $_REQUEST) && strlen($_REQUEST['k']) ) {
         $key = trim($_REQUEST['k']);
-        $keys = parse_ini_file('./settings/keys.ini', true);
+        $keys_file = __DIR__ . '/settings/keys.ini';
+        if (file_exists(__DIR__ . '/settings/common/keys.ini'))
+          $keys_file = __DIR__ . '/settings/common/keys.ini';
+        if (file_exists(__DIR__ . '/settings/server/keys.ini'))
+          $keys_file = __DIR__ . '/settings/server/keys.ini';
+        $keys = parse_ini_file($keys_file, true);
+
         if( $admin && $key == 'all' ) {
+            if (!isset($_REQUEST['days']))
+              $days = 1;
             $day = gmdate('Ymd');
             if( strlen($req_date) )
                 $day = $req_date;
-            $keyfile = "./dat/keys_$day.dat";
-            $usage = null;
-            if( is_file($keyfile) )
-              $usage = json_decode(file_get_contents($keyfile), true);
-            if( !isset($usage) )
-              $usage = array();
-
+            $targetDate = new DateTime('now', new DateTimeZone('GMT'));
+            $usage = array();
+            for($offset = 0; $offset < $days; $offset++) {
+                $keyfile = './dat/keys_' . $targetDate->format("Ymd") . '.dat';
+                if( is_file($keyfile) ) {
+                  $day_usage = json_decode(file_get_contents($keyfile), true);
+                  if (isset($day_usage) && is_array($day_usage)) {
+                    foreach ($day_usage as $k => $used) {
+                      if (!isset($usage[$k]))
+                        $usage[$k] = 0;
+                      $usage[$k] += $used;
+                    }
+                  }
+                }
+                $date = $targetDate->format("Y/m/d");
+                $targetDate->modify('-1 day');
+            }
             $used = array();
             foreach($keys as $key => &$keyUser)
             {
-                $u = (int)$usage[$key];
+                $u = isset($usage[$key]) ? (int)$usage[$key] : 0;
                 if( $u )
                     $used[] = array('used' => $u, 'description' => $keyUser['description'], 'contact' => $keyUser['contact'], 'limit' => $keyUser['limit']);
             }
-            if( count($used) )
-            {
-                usort($used, 'comp');
-                echo "<table class=\"table\"><tr><th>Used</th><th>Limit</th><th>Contact</th><th>Description</th></tr>";
-                foreach($used as &$entry)
-                    echo "<tr><td>{$entry['used']}</td><td>{$entry['limit']}</td><td>{$entry['contact']}</td><td>{$entry['description']}</td></tr>";
-                echo '</table>';
+            if (isset($_REQUEST['domains'])) {
+              $domains = array();
+              foreach($used as &$entry) {
+                $email = $entry['contact'];
+                $offset = strpos($email, '@');
+                if ($offset > 0) {
+                  $domain = substr($email, $offset + 1);
+                  if (!isset($domains[$domain])) {
+                    $domains[$domain] = 0;
+                  }
+                  $domains[$domain] += $entry['used'];
+                }
+              }
+              arsort($domains);
+              echo "<table class=\"table\"><tr><th>Used</th><th>Contact Domain</th></tr>";
+              foreach($domains as $domain => $count) {
+                echo "<tr><td>$count</td><td>$domain</td></tr>";
+              }
+              echo '</table>';
+          } else {
+              if( count($used) )
+              {
+                  usort($used, 'comp');
+                  echo "<table class=\"table\"><tr><th>Used</th><th>Limit</th><th>Contact</th><th>Description</th></tr>";
+                  foreach($used as &$entry)
+                      echo "<tr><td>{$entry['used']}</td><td>{$entry['limit']}</td><td>{$entry['contact']}</td><td>{$entry['description']}</td></tr>";
+                  echo '</table>';
+              }
             }
         } else {
             if( isset($keys[$key]) ) {
+                $out = array();
                 $limit = (int)@$keys[$key]['limit'];
-                echo "<table class=\"table\"><tr><th>Date</th><th>Used</th><th>Limit</th></tr>";
+                if (!$json)
+                  echo "<table class=\"table\"><tr><th>Date</th><th>Used</th><th>Limit</th></tr>";
                 $targetDate = new DateTime('now', new DateTimeZone('GMT'));
                 for($offset = 0; $offset <= $days; $offset++) {
                     $keyfile = './dat/keys_' . $targetDate->format("Ymd") . '.dat';
@@ -57,16 +104,24 @@ include 'admin_header.inc';
                       $used = (int)@$usage[$key];
                     }
                     $date = $targetDate->format("Y/m/d");
-                    echo "<tr><td>$date</td><td>$used</td><td>$limit</td></tr>\n";
+                    if ($json) {
+                      $out[] = array('date' => $date, 'used' => $used, 'limit' => $limit);
+                    } else {
+                      echo "<tr><td>$date</td><td>$used</td><td>$limit</td></tr>\n";
+                    }
                     $targetDate->modify('-1 day');
                 }
-                echo '</table>';
+                if (!$json)
+                  echo '</table>';
 
                 $limit = (int)$keys[$key]['limit'];
                 if( isset($usage[$key]) )
                   $used = (int)$usage[$key];
                 else
                   $used = 0;
+                if ($json) {
+                  json_response($out);
+                }
             }
         }
     } elseif ($privateInstall || $admin) {
@@ -83,10 +138,14 @@ include 'admin_header.inc';
             $ui = 0;
             foreach ($file as &$line) {
               $parts = tokenizeLogLine($line);
+              $count = 1;
+              if (isset($parts['count'])) {
+                $count = max(1, intval($parts['count']));
+              }
               if (array_key_exists('key', $parts) && strlen($parts['key']))
-                $api++;
+                $api += $count;
               else
-                $ui++;
+                $ui += $count;
             }
             $count = $api + $ui;
             $date = $targetDate->format("Y/m/d");
@@ -116,6 +175,7 @@ function comp($a, $b)
     return ($a['used'] > $b['used']) ? -1 : 1;
 }
 
-include 'admin_footer.inc';
-
+if (!$json) {
+  include 'admin_footer.inc';
+}
 ?>

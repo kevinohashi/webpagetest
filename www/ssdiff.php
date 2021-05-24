@@ -1,10 +1,13 @@
 <?php
+// Copyright 2020 Catchpoint Systems Inc.
+// Use of this source code is governed by the Polyform Shield 1.0.0 license that can be
+// found in the LICENSE.md file.
 include 'common.inc';
 require_once('page_data.inc');
-$page_keywords = array('image','comparison','Webpagetest','Website Speed Test');
-$page_description = "Visual comparison of multiple website screen shots.";
-$title = 'Web page screen shot diff';
-$gaTemplate = 'Screen Shot Diff';
+$page_keywords = array('image','comparison','WebPageTest','Website Speed Test');
+$page_description = "Visual comparison of multiple website screenshots.";
+$title = 'WebPageTest screenshot diff';
+$gaTemplate = 'Screenshot Diff';
 
 $refPath = GetTestPath($_REQUEST['ref']);
 $refData = loadAllPageData($refPath);
@@ -24,19 +27,19 @@ if( $refRun && $cmpRun )
 }
 ?>
 <!DOCTYPE html>
-<html>
+<html lang="en-us">
     <head>
-        <title>WebPagetest - Screen Shot diff</title>
+        <title>WebPageTest - Screenshot Diff</title>
         <?php include ('head.inc'); ?>
     </head>
-    <body>
+    <body <?php if ($COMPACT_MODE) {echo 'class="compact"';} ?>>
         <div class="page">
             <?php
             $tab = 'Test Result';
             $nosubheader = true;
             $filmstrip = $_REQUEST['tests'];
             include 'header.inc';
-            
+
             if( isset($refImg) && isset($cmpImg) )
             {
                 echo '<table style="text-align:center;">';
@@ -54,9 +57,9 @@ if( $refRun && $cmpRun )
                 echo '</table>';
             }
             else
-                echo 'Sorry, the screen shots were not available for comparison';
-        
-            include('footer.inc'); 
+                echo 'Sorry, the screenshots were not available for comparison';
+
+            include('footer.inc');
             ?>
         </div>
     </body>

@@ -1,13 +1,22 @@
 <?php
+// Copyright 2020 Catchpoint Systems Inc.
+// Use of this source code is governed by the Polyform Shield 1.0.0 license that can be
+// found in the LICENSE.md file.
 chdir ('..');
 include 'common.inc';
+
+if (!$privateInstall && !$admin) {
+    header("HTTP/1.1 403 Unauthorized");
+    exit;
+}
+  
 ?>
 <!DOCTYPE html>
-<html>
+<html lang="en-us">
     <head>
-        <title>WebPagetest - Install Check</title>
+        <title>WebPageTest - Install Check</title>
         <meta http-equiv="charset" content="iso-8859-1">
-        <meta name="description" content="Installation check for WebPagetest">
+        <meta name="description" content="Installation check for WebPageTest">
         <meta name="author" content="Patrick Meenan">
         <meta name="robots" content="noindex,nofollow" />
         <style type="text/css">
@@ -19,17 +28,17 @@ include 'common.inc';
             padding:0 2em;
             margin:0;
         }
-        li.pass { 
+        li.pass {
             background:url("../images/check.png") no-repeat 0 0;
-            padding-left: 20px; 
+            padding-left: 20px;
         }
-        li.fail { 
+        li.fail {
             background:url("../images/error.png") no-repeat 0 0;
-            padding-left: 20px; 
+            padding-left: 20px;
         }
-        li.warn { 
+        li.warn {
             background:url("../images/warning.png") no-repeat 0 0;
-            padding-left: 20px; 
+            padding-left: 20px;
         }
         span.pass {
             color: #008600;
@@ -45,12 +54,13 @@ include 'common.inc';
         }
         </style>
     </head>
-    <body>
-        <h1>WebPagetest <?php echo VER_WEBPAGETEST; ?> Installation Check</h1>
+    <body <?php if ($COMPACT_MODE) {echo 'class="compact"';} ?>>
+        <h1>WebPageTest <?php echo VER_WEBPAGETEST; ?> Installation Check</h1>
         <h2>PHP</h2><ul>
         <?php CheckPHP(); ?>
         </ul><h2>System Utilities</h2><ul>
         <?php CheckUtils(); ?>
+      </ul><h2>Misc.</h2><ul>
         </ul><h2>Filesystem</h2><ul>
         <?php CheckFilesystem(); ?>
         </ul><h2>Test Locations</h2><ul>
@@ -89,29 +99,28 @@ function ShowCheck($label, $pass, $required = true, $value = null) {
 /*-----------------------------------------------------------------------------
 -----------------------------------------------------------------------------*/
 function CheckPHP() {
-    global $settings;
     ShowCheck('PHP version at least 5.3', phpversion() >= 5.3, true, phpversion());
-    ShowCheck('GD Module Installed', extension_loaded('gd'));
+    ShowCheck('GD module installed', extension_loaded('gd'));
     ShowCheck('FreeType enabled for GD (required for video rendering)', CheckFreeType(), false);
-    ShowCheck('zip Module Installed', extension_loaded('zip'));
-    ShowCheck('zlib Module Installed', extension_loaded('zlib'));
-    ShowCheck('curl Module Installed', extension_loaded('curl'), false);
+    ShowCheck('zip module installed', extension_loaded('zip'));
+    ShowCheck('zlib module installed', extension_loaded('zlib'));
+    ShowCheck('mbstring available', function_exists('mb_substr'));
+    ShowCheck('curl module installed', extension_loaded('curl'), false);
     ShowCheck('php.ini allow_url_fopen enabled', ini_get('allow_url_fopen'), true);
-    ShowCheck('APC Installed', extension_loaded('apc'), false);
-    ShowCheck('SQLite Installed (for editable test labels)', class_exists("SQLite3"), false);
-    ShowCheck('php.ini upload_max_filesize > 10MB', return_bytes(ini_get('upload_max_filesize')) > 10000000, false, ini_get('upload_max_filesize'));
-    ShowCheck('php.ini post_max_size > 10MB', return_bytes(ini_get('post_max_size')) > 10000000, false, ini_get('post_max_size'));
+    ShowCheck('APC installed', extension_loaded('apc') || extension_loaded('apcu'), false);
+    ShowCheck('SQLite installed (for editable test labels)', class_exists("SQLite3"), false);
+    ShowCheck('php.ini upload_max_filesize >= 100MB', return_bytes(ini_get('upload_max_filesize')) > 100000000, false, ini_get('upload_max_filesize'));
+    ShowCheck('php.ini post_max_size >= 100MB', return_bytes(ini_get('post_max_size')) > 100000000, false, ini_get('post_max_size'));
     ShowCheck('php.ini memory_limit > 256MB or -1 (disabled)', return_bytes(ini_get('memory_limit')) > 256000000 || ini_get('memory_limit') == -1, false, ini_get('memory_limit'));
 }
 
 function CheckUtils() {
-    ShowCheck('ffmpeg Installed with --enable-libx264 (required for video)', CheckFfmpeg());
-    ShowCheck('ffmpeg Installed with scale and decimate filters(required for mobile video)', CheckFfmpegFilters($ffmpegInfo), false, $ffmpegInfo);
-    ShowCheck('imagemagick compare Installed (required for mobile video)', CheckCompare(), false);
-    ShowCheck('jpegtran Installed (required for JPEG Analysis)', CheckJpegTran(), false);
-    ShowCheck('exiftool Installed (required for JPEG Analysis)', CheckExifTool(), false);
-    if (array_key_exists('beanstalkd', $settings))
-        ShowCheck("beanstalkd responding on {$settings['beanstalkd']} (configured in settings.ini)", CheckBeanstalkd());
+  ShowCheck('ffmpeg installed with --enable-libx264 (required for video)', CheckFfmpeg());
+  ShowCheck('jpegtran installed (required for JPEG analysis)', CheckJpegTran(), false);
+  ShowCheck('exiftool installed (required for JPEG analysis)', CheckExifTool(), false);
+  $beanstalk = GetSetting('beanstalkd');
+  if ($beanstalk)
+      ShowCheck("beanstalkd responding on $beanstalk (configured in settings.ini)", CheckBeanstalkd());
 }
 
 /*-----------------------------------------------------------------------------
@@ -121,7 +130,6 @@ function CheckFilesystem() {
     ShowCheck('{docroot}/dat writable', IsWritable('dat'));
     ShowCheck('{docroot}/results writable', IsWritable('results'));
     ShowCheck('{docroot}/work/jobs writable', IsWritable('work/jobs'));
-    ShowCheck('{docroot}/work/video writable', IsWritable('work/video'));
     ShowCheck('{docroot}/logs writable', IsWritable('logs'));
     if ('Linux' == PHP_OS) {
         ShowCheck('{docroot}/tmp on tmpfs', IsWPTTmpOnTmpfs(), false);
@@ -149,7 +157,7 @@ function CheckLocations() {
     $out = '';
     foreach($locations['locations'] as $id => $location) {
         if (is_numeric($id)) {
-            $info = GetLocationInfo($locations, $location);
+            $info = GetInstallLocationInfo($locations, $location);
             $out .= "<li class=\"{$info['state']}\">{$info['label']}";
             if (count($info['locations'])) {
                 $out .= "<ul>";
@@ -167,8 +175,8 @@ function CheckLocations() {
 
 /*-----------------------------------------------------------------------------
 -----------------------------------------------------------------------------*/
-function GetLocationInfo(&$locations, $location) {
-    $info = array('state' => 'pass', 'label' => "$location : ", 'video' => false, 'locations' => array());
+function GetInstallLocationInfo(&$locations, $location) {
+    $info = array('state' => 'pass', 'label' => "$location : ", 'locations' => array());
     if (array_key_exists($location, $locations)) {
         if (array_key_exists('label', $locations[$location])) {
             $info['label'] .= $locations[$location]['label'];
@@ -189,34 +197,13 @@ function GetLocationInfo(&$locations, $location) {
                         $info['state'] = 'fail';
                     }
                     $info['locations'][$loc_name]['label'] .= ' - ';
-                    $file = "./tmp/$loc_name.tm";
                     $testerCount = 0;
                     $elapsedCheck = -1;
-                    $lock = LockLocation($loc_name);
-                    if ($lock) {
-                        if (is_file($file)) {
-                            $now = time();
-                            $testers = json_decode(file_get_contents($file), true);
-                            $testerCount = count($testers);
-                            if( $testerCount ) {
-                                $latest = 0;
-                                foreach($testers as $tester) {
-                                    if( array_key_exists('updated', $tester) && $tester['updated'] > $latest) {
-                                        $latest = $tester['updated'];
-                                    }
-                                    if (array_key_exists('video', $tester) && $tester['video']) {
-                                        $info['video'] = true;
-                                    }
-                                }
-                                if ($latest > 0) {
-                                    $elapsedCheck = 0;
-                                    if( $now > $latest )
-                                        $elapsedCheck = (int)(($now - $latest) / 60);
-                                }
-                            }
-                        }
-                        UnlockLocation($lock);
-                    }
+                    $testers = GetTesters($loc_name);
+                    if (isset($testers['elapsed']))
+                      $elapsedCheck = $testers['elapsed'];
+                    if (isset($testers) && is_array($testers) && isset($testers['testers']))
+                      $testerCount = count($testers['testers']);
                     if ($testerCount && $elapsedCheck >= 0) {
                         if ($elapsedCheck < 60) {
                             $info['locations'][$loc_name]['label'] .= "<span class=\"pass\">$testerCount agents connected</span>";
@@ -292,13 +279,12 @@ function return_bytes($val) {
 
 /**
 * See if we can talk to beanstalkd
-* 
+*
 */
 function CheckBeanstalkd() {
-    global $settings;
     $ret = false;
     require_once('./lib/beanstalkd/pheanstalk_init.php');
-    $pheanstalk = new Pheanstalk_Pheanstalk($settings['beanstalkd']);
+    $pheanstalk = new Pheanstalk_Pheanstalk(GetSetting('beanstalkd'));
     if ($pheanstalk->getConnection()->isServiceListening()) {
         $id = $pheanstalk->putInTube('wpt.installtest', "test");
         $jobStats = $pheanstalk->statsJob($id);
@@ -313,7 +299,7 @@ function CheckBeanstalkd() {
 
 /**
 * Check to make sure ffmpeg is installed and working
-* 
+*
 */
 function CheckFfmpeg() {
     $ret = false;
@@ -328,50 +314,8 @@ function CheckFfmpeg() {
                 $x264 = true;
         }
     }
-    
+
     return $ret && $x264;
-}
-
-/**
-* Check to make sure ffmpeg is installed and working
-* 
-*/
-function CheckFfmpegFilters(&$info) {
-    $ret = false;
-    $command = "ffmpeg -version";
-    $retStr = exec($command, $output, $result);
-    $ver = 'Not Detected';
-    if (count($output)) {
-      foreach ($output as $line) {
-        if (preg_match('/^ffmpeg version (?P<ver>[^ ]+)/i', $line, $matches) && array_key_exists('ver', $matches)) {
-          $ver = $matches['ver'];
-        }
-      }
-    }
-
-    $command = "ffmpeg -filters";
-    $retStr = exec($command, $output, $result);
-    $fps = false;
-    $decimate = null;
-    $scale = false;
-    if (count($output)) {
-      foreach ($output as $line) {
-        if (!strncmp($line, 'scale ', 6))
-          $scale = true;
-        if (preg_match('/(?P<filter>[mp]*decimate).*V->V.*Remove near-duplicate frames/', $line, $matches))
-          $decimate = $matches['filter'];
-      }
-    }
-
-    if ($scale && isset($decimate))
-      $ret = true;
-    $info = $ver;
-    if ($scale)
-      $info .= ',scale';
-    if (isset($decimate))
-      $info .= ",$decimate";
-
-    return $ret;
 }
 
 function CheckJpegTran() {
@@ -385,16 +329,7 @@ function CheckJpegTran() {
 
 function CheckExifTool() {
     $ret = false;
-    $command = "exiftool";
-    $retStr = exec($command, $output, $result);
-    if ($result == 0)
-      $ret = true;
-    return $ret;
-}
-
-function CheckCompare() {
-    $ret = false;
-    $command = "compare -version";
+    $command = "exiftool -ver";
     $retStr = exec($command, $output, $result);
     if ($result == 0)
       $ret = true;

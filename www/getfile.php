@@ -1,4 +1,7 @@
 <?php
+// Copyright 2020 Catchpoint Systems Inc.
+// Use of this source code is governed by the Polyform Shield 1.0.0 license that can be
+// found in the LICENSE.md file.
 if(array_key_exists("HTTP_IF_MODIFIED_SINCE",$_SERVER) && strlen(trim($_SERVER['HTTP_IF_MODIFIED_SINCE']))) {
   header("HTTP/1.0 304 Not Modified");
 } else {
@@ -6,7 +9,7 @@ if(array_key_exists("HTTP_IF_MODIFIED_SINCE",$_SERVER) && strlen(trim($_SERVER['
   $ok = false;
   if (isset($_REQUEST['file']) && isset($testPath) && is_dir($testPath)) {
     $file = $_REQUEST['file'];
-    if (preg_match('/[a-zA-Z0-9_\-]+\.(?P<ext>png|jpg|txt|zip|csv)/i', $file, $matches)) {
+    if (preg_match('/[a-zA-Z0-9_\-]+\.(?P<ext>png|jpg|txt|zip|csv|mp4)$/i', $file, $matches)) {
       $ext = strtolower($matches['ext']);
       $dir = '';
       if (isset($_REQUEST['video']) && preg_match('/[a-zA-Z0-9_\-]+/i', $_REQUEST['video'])) {
@@ -17,7 +20,7 @@ if(array_key_exists("HTTP_IF_MODIFIED_SINCE",$_SERVER) && strlen(trim($_SERVER['
         $ok = true;
         header('Last-Modified: ' . gmdate('r'));
         header('Expires: '.gmdate('r', time() + 31536000));
-        header('Cache-Control: public,max-age=31536000');
+        header('Cache-Control: public,max-age=31536000', true);
         if ($ext == 'jpg') {
           header ("Content-type: image/jpeg");
         } elseif ($ext == 'png') {
@@ -27,7 +30,9 @@ if(array_key_exists("HTTP_IF_MODIFIED_SINCE",$_SERVER) && strlen(trim($_SERVER['
         } elseif ($ext == 'csv') {
           header ("Content-type: text/csv");
         } elseif ($ext == 'zip') {
-          header ("application/zip");
+          header ("Content-type: application/zip");
+        } elseif ($ext == 'mp4') {
+          header ("Content-type: video/mp4");
         }
         header('Content-Length: ' . filesize($filePath));
         readfile($filePath);

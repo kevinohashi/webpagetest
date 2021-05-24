@@ -1,4 +1,7 @@
 <?php
+// Copyright 2020 Catchpoint Systems Inc.
+// Use of this source code is governed by the Polyform Shield 1.0.0 license that can be
+// found in the LICENSE.md file.
 chdir('..');
 include 'common.inc';
 $id = $_REQUEST['id'];
@@ -13,9 +16,9 @@ else
 {
 ?>
 <!DOCTYPE html>
-<html>
+<html lang="en-us">
     <head>
-        <title>WebPagetest - Visual Comparison</title>
+        <title>WebPageTest - Visual Comparison</title>
         <?php $gaTemplate = 'Video Download Error'; include ('head.inc'); ?>
         <style type="text/css">
             div.content
@@ -37,14 +40,14 @@ else
             }
         </style>
     </head>
-    <body>
+    <body <?php if ($COMPACT_MODE) {echo 'class="compact"';} ?>>
         <div class="page">
             <?php
             $tab = null;
             include 'header.inc';
             ?>
-            <h1>The video requested does not exist.</h1>
-            
+            <h1>The requested video does not exist.</h1>
+
             <?php include('footer.inc'); ?>
         </div>
     </body>

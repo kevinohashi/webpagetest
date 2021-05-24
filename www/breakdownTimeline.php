@@ -1,76 +1,112 @@
 <?php
+// Copyright 2020 Catchpoint Systems Inc.
+// Use of this source code is governed by the Polyform Shield 1.0.0 license that can be
+// found in the LICENSE.md file.
 include 'common.inc';
 require_once('breakdown.inc');
 require_once('contentColors.inc');
 require_once('waterfall.inc');
 require_once('page_data.inc');
 
-$page_keywords = array('Timeline Breakdown','Webpagetest','Website Speed Test','Page Speed');
-$page_description = "Chrome main thread processing breakdown$testLabel";
+$page_keywords = array('Timeline Breakdown','WebPageTest','Website Speed Test','Page Speed');
+$page_description = "Chrome main-thread processing breakdown$testLabel";
 
 ?>
 <!DOCTYPE html>
-<html>
+<html lang="en-us">
     <head>
-        <title>WebPagetest Content Breakdown<?php echo $testLabel; ?></title>
+        <title>WebPageTest Content Breakdown<?php echo $testLabel; ?></title>
         <?php $gaTemplate = 'Content Breakdown'; include ('head.inc'); ?>
         <style type="text/css">
             td {
-                text-align:left; 
+                text-align:left;
                 vertical-align:top;
                 padding:1em;
             }
 
             div.bar {
-                height:12px; 
-                margin-top:auto; 
+                height:20px;
+                margin-top:auto;
                 margin-bottom:auto;
             }
-            
+
             div.table {
               margin-left: auto;
               margin-right: auto;
             }
 
             td.legend {
-                white-space:nowrap; 
-                text-align:left; 
-                vertical-align:top; 
+                white-space:nowrap;
+                text-align:left;
+                vertical-align:top;
                 padding:0;
             }
-            
+
             th.header {
               font-weight: normal;
             }
         </style>
     </head>
-    <body>
-        <div class="page">
+    <body <?php if ($COMPACT_MODE) {echo 'class="compact"';} ?>>
             <?php
             $tab = 'Test Result';
-            $subtab = 'Processing Breakdown';
+            $subtab = 'Processing';
             include 'header.inc';
             $processing = GetDevToolsCPUTime($testPath, $run, $cached);
             if (isset($processing)) {
               arsort($processing);
               $mapping = array('EvaluateScript' => 'Scripting',
+                               'v8.compile' => 'Scripting',
                                'FunctionCall' => 'Scripting',
                                'GCEvent' => 'Scripting',
                                'TimerFire' => 'Scripting',
-                               'Layout' => 'Rendering',
-                               'RecalculateStyles' => 'Rendering',
+                               'EventDispatch' => 'Scripting',
+                               'TimerInstall' => 'Scripting',
+                               'TimerRemove' => 'Scripting',
+                               'XHRLoad' => 'Scripting',
+                               'XHRReadyStateChange' => 'Scripting',
+                               'MinorGC' => 'Scripting',
+                               'MajorGC' => 'Scripting',
+                               'FireAnimationFrame' => 'Scripting',
+                               'ThreadState::completeSweep' => 'Scripting',
+                               'Heap::collectGarbage' => 'Scripting',
+                               'ThreadState::performIdleLazySweep' => 'Scripting',
+
+                               'Layout' => 'Layout',
+                               'UpdateLayoutTree' => 'Layout',
+                               'RecalculateStyles' => 'Layout',
+                               'ParseAuthorStyleSheet' => 'Layout',
+                               'ScheduleStyleRecalculation' => 'Layout',
+                               'InvalidateLayout' => 'Layout',
+
                                'Paint' => 'Painting',
                                'DecodeImage' => 'Painting',
+                               'Decode Image' => 'Painting',
                                'ResizeImage' => 'Painting',
                                'CompositeLayers' => 'Painting',
                                'Rasterize' => 'Painting',
-                               'ResourceReceivedData' => 'Loading',
+                               'PaintImage' => 'Painting',
+                               'PaintSetup' => 'Painting',
+                               'ImageDecodeTask' => 'Painting',
+                               'GPUTask' => 'Painting',
+                               'SetLayerTreeId' => 'Painting',
+                               'layerId' => 'Painting',
+                               'UpdateLayer' => 'Painting',
+                               'UpdateLayerTree' => 'Painting',
+                               'Draw LazyPixelRef' => 'Painting',
+                               'Decode LazyPixelRef' => 'Painting',
+
                                'ParseHTML' => 'Loading',
+                               'ResourceReceivedData' => 'Loading',
                                'ResourceReceiveResponse' => 'Loading',
+                               'ResourceSendRequest' => 'Loading',
+                               'ResourceFinish' => 'Loading',
+                               'CommitLoad' => 'Loading',
+
                                'Idle' => 'Idle');
-              $groups = array('Scripting' => 0, 'Rendering' => 0, 'Painting' => 0, 'Loading' => 0, 'Other' => 0, 'Idle' => 0);
+              $groups = array('Scripting' => 0, 'Layout' => 0, 'Painting' => 0, 'Loading' => 0, 'Other' => 0, 'Idle' => 0);
               $groupColors = array('Scripting' => '#f1c453',
-                                   'Rendering' => '#9a7ee6',
+                                   'Layout' => '#9a7ee6',
                                    'Painting' => '#71b363',
                                    'Loading' => '#70a2e3',
                                    'Other' => '#f16161',
@@ -85,11 +121,11 @@ $page_description = "Chrome main thread processing breakdown$testLabel";
               }
             }
             ?>
-            
+
             <table align="center">
                 <tr>
                     <th class="header" colspan="2">
-                    <h2>Main thread processing breakdown</h2>
+                    <h2>Main-thread processing breakdown</h2>
                     Where the browser's main thread was busy, not including idle time waiting for resources <?php
                       echo " (<a href=\"/timeline/" . VER_TIMELINE . "timeline.php?test=$id&run=$run&cached=$cached\" title=\"View Chrome Dev Tools Timeline\">view timeline</a>)";
                     ?>.
@@ -108,13 +144,13 @@ $page_description = "Chrome main thread processing breakdown$testLabel";
                         <div class="table" id="tableGroups" style="width: 200px;"></div>
                     </td>
                     <td>
-                        <div class="table" id="tableEvents" style="width: 300px;"></div>
+                        <div class="table" id="tableEvents" style="width: 400px;"></div>
                     </td>
                 </tr>
                 <tr>
                     <th class="header" colspan="2">
-                    <h2>Main thread time breakdown</h2>
-                    All of the main thread activity including idle (waiting for resources usually) <?php
+                    <h2>Main-thread time breakdown</h2>
+                    All of the main-thread activity including idle (waiting for resources usually) <?php
                       echo " (<a href=\"/timeline/" . VER_TIMELINE . "timeline.php?test=$id&run=$run&cached=$cached\" title=\"View Chrome Dev Tools Timeline\">view timeline</a>)";
                     ?>.
                     </th>
@@ -132,18 +168,17 @@ $page_description = "Chrome main thread processing breakdown$testLabel";
                         <div class="table" id="tableGroupsIdle" style="width: 200px;"></div>
                     </td>
                     <td>
-                        <div class="table" id="tableEventsIdle" style="width: 300px;"></div>
+                        <div class="table" id="tableEventsIdle" style="width: 400px;"></div>
                     </td>
                 </tr>
             </table>
         </div>
-        
         <?php include('footer.inc'); ?>
 
         <!--Load the AJAX API-->
-        <script type="text/javascript" src="<?php echo $GLOBALS['ptotocol']; ?>://www.google.com/jsapi"></script>
+        <script type="text/javascript" src="//www.google.com/jsapi"></script>
         <script type="text/javascript">
-    
+
         // Load the Visualization API and the table package.
         google.load('visualization', '1', {'packages':['table', 'corechart']});
         google.setOnLoadCallback(drawTable);
@@ -161,34 +196,37 @@ $page_description = "Chrome main thread processing breakdown$testLabel";
             var eventColors = new Array();
             <?php
             $index = 0;
-            foreach($groups as $type => $time)
-            {
-              if ($type != 'Idle') {
-                echo "groups.setValue($index, 0, '$type');\n";
-                echo "groups.setValue($index, 1, $time);\n";
-                $color = $groupColors[$type];
-                echo "groupColors.push('$color');\n";
-                $index++;
+            if (isset($groups) && is_array($groups) && count($groups)) {
+              foreach($groups as $type => $time)
+              {
+                if ($type != 'Idle') {
+                  echo "groups.setValue($index, 0, '$type');\n";
+                  echo "groups.setValue($index, 1, $time);\n";
+                  $color = $groupColors[$type];
+                  echo "groupColors.push('$color');\n";
+                  $index++;
+                }
               }
             }
             $index = 0;
-            foreach($processing as $type => $time)
-            {
-              if ($type != 'Idle') {
-                echo "events.setValue($index, 0, '$type');\n";
-                echo "events.setValue($index, 1, $time);\n";
-                $group = 'Other';
-                if (array_key_exists($type, $mapping))
-                  $group = $mapping[$type];
-                $color = $groupColors[$group];
-                echo "eventColors.push('$color');\n";
-                $index++;
+            if (isset($processing) && is_array($processing) && count($processing)) {
+              foreach($processing as $type => $time) {
+                if ($type != 'Idle') {
+                  echo "events.setValue($index, 0, '$type');\n";
+                  echo "events.setValue($index, 1, $time);\n";
+                  $group = 'Other';
+                  if (array_key_exists($type, $mapping))
+                    $group = $mapping[$type];
+                  $color = $groupColors[$group];
+                  echo "eventColors.push('$color');\n";
+                  $index++;
+                }
               }
             }
             ?>
             var viewGroups = new google.visualization.DataView(groups);
             viewGroups.setColumns([0, 1]);
-            
+
             var tableGroups = new google.visualization.Table(document.getElementById('tableGroups'));
             tableGroups.draw(viewGroups, {showRowNumber: false, sortColumn: 1, sortAscending: false});
 
@@ -196,10 +234,10 @@ $page_description = "Chrome main thread processing breakdown$testLabel";
             google.visualization.events.addListener(pieGroups, 'ready', function(){markUserTime('aft.Groups Pie');});
             pieGroups.draw(viewGroups, {width: 450, height: 300, title: 'Processing Categories', colors: groupColors});
 
-            
+
             var viewEvents = new google.visualization.DataView(events);
             viewEvents.setColumns([0, 1]);
-            
+
             var tableEvents = new google.visualization.Table(document.getElementById('tableEvents'));
             tableEvents.draw(viewEvents, {showRowNumber: false, sortColumn: 1, sortAscending: false});
 
@@ -221,40 +259,44 @@ $page_description = "Chrome main thread processing breakdown$testLabel";
             var eventColors = new Array();
             <?php
             $index = 0;
-            foreach($groups as $type => $time)
-            {
-                echo "groupsIdle.setValue($index, 0, '$type');\n";
-                echo "groupsIdle.setValue($index, 1, $time);\n";
-                $color = $groupColors[$type];
-                echo "groupColors.push('$color');\n";
-                $index++;
+            if (isset($groups) && is_array($groups) && count($groups)) {
+              foreach($groups as $type => $time)
+              {
+                  echo "groupsIdle.setValue($index, 0, '$type');\n";
+                  echo "groupsIdle.setValue($index, 1, $time);\n";
+                  $color = $groupColors[$type];
+                  echo "groupColors.push('$color');\n";
+                  $index++;
+              }
             }
             $index = 0;
-            foreach($processing as $type => $time)
-            {
-                echo "eventsIdle.setValue($index, 0, '$type');\n";
-                echo "eventsIdle.setValue($index, 1, $time);\n";
-                $group = 'Other';
-                if (array_key_exists($type, $mapping))
-                  $group = $mapping[$type];
-                $color = $groupColors[$group];
-                echo "eventColors.push('$color');\n";
-                $index++;
+            if (isset($processing) && is_array($processing) && count($processing)) {
+              foreach($processing as $type => $time)
+              {
+                  echo "eventsIdle.setValue($index, 0, '$type');\n";
+                  echo "eventsIdle.setValue($index, 1, $time);\n";
+                  $group = 'Other';
+                  if (array_key_exists($type, $mapping))
+                    $group = $mapping[$type];
+                  $color = $groupColors[$group];
+                  echo "eventColors.push('$color');\n";
+                  $index++;
+              }
             }
             ?>
             var viewGroupsIdle = new google.visualization.DataView(groupsIdle);
             viewGroupsIdle.setColumns([0, 1]);
-            
+
             var tableGroupsIdle = new google.visualization.Table(document.getElementById('tableGroupsIdle'));
             tableGroupsIdle.draw(viewGroupsIdle, {showRowNumber: false, sortColumn: 1, sortAscending: false});
 
             var pieGroupsIdle = new google.visualization.PieChart(document.getElementById('pieGroupsIdle'));
             pieGroupsIdle.draw(viewGroupsIdle, {width: 450, height: 300, title: 'Processing Categories', colors: groupColors});
 
-            
+
             var viewEventsIdle = new google.visualization.DataView(eventsIdle);
             viewEventsIdle.setColumns([0, 1]);
-            
+
             var tableEventsIdle = new google.visualization.Table(document.getElementById('tableEventsIdle'));
             tableEventsIdle.draw(viewEventsIdle, {showRowNumber: false, sortColumn: 1, sortAscending: false});
 

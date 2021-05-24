@@ -1,3 +1,6 @@
+// Copyright 2020 Catchpoint Systems Inc.
+// Use of this source code is governed by the Polyform Shield 1.0.0 license that can be
+// found in the LICENSE.md file.
 google.load("visualization", "1", {packages:["corechart", "table"]});
 google.setOnLoadCallback(onLoadHandler);
 
@@ -31,19 +34,25 @@ function drawChart(chart_metric) {
     row = []
     for (column in chart_metric['columns']) {
        // If run i is missing, we add a cell with
-        // an undefined array element as a placeholder.
+       // an undefined array element as a placeholder.
       cell = chart_metric['columns'][column].values[i];
+      // Ensure cell is a number, best effort to turn it into a number.
+      if (typeof cell !== 'number') {
+        cell = parseFloat(cell, 10);
+      }
       row = row.concat([cell]);
 
     }
     data.addRow(row);
   }
+  
   var options = {
       legend: (series.length == 1) ? 'none' : 'right',
       width: 950,
       height: Math.max(500, series.length * 45),
       lineWidth: 1,
       hAxis: {minValue: 1, maxValue: runs, gridlines: {count: runs}},
+      vAxis: (zeroStart) ? {minValue: 0} : {minValue: null},
       series: series,
       chartArea: { width: "60%", left: 70, height: "85%" }
   }

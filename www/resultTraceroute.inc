@@ -1,23 +1,22 @@
 <!DOCTYPE html>
-<html>
+<html lang="en-us">
     <head>
-        <title>WebPagetest - Traceroute test result<?php echo $testLabel; ?></title>
+        <title>WebPageTest - Traceroute test result<?php echo $testLabel; ?></title>
         <?php
-            $gaTemplate = 'Traceroute Result'; 
-            $page_keywords = array('Traceroute','Webpagetest','Website Speed Test','Page Speed');
+            $gaTemplate = 'Traceroute Result';
+            $page_keywords = array('Traceroute','WebPageTest','Website Speed Test','Page Speed');
             $page_description = "Traceroute result.";
             include ('head.inc');
             require_once('testStatus.inc');
         ?>
     </head>
-    <body>
-        <div class="page">
+    <body <?php if ($COMPACT_MODE) {echo 'class="compact"';} ?>>
             <?php
             $tab = 'Test Result';
             $nosubheader = true;
             include 'header.inc';
             ?>
-            <div class="translucent">
+            <div class="box">
                 <h2>Traceroute to <?php echo $url;?></h2>
                 From: <?php echo $test['test']['location'];?><br>
                 <?php if( (int)$test['test']['runs'] > 1 ) echo 'Test runs: <b>' . $test['test']['runs'] . '</b><br>'; ?>
@@ -38,9 +37,12 @@
 </html>
 
 <?php
+// Copyright 2020 Catchpoint Systems Inc.
+// Use of this source code is governed by the Polyform Shield 1.0.0 license that can be
+// found in the LICENSE.md file.
 /**
 * Output the data table for the traceroute
-* 
+*
 * @param mixed $testPath
 * @param mixed $run
 */
@@ -77,7 +79,7 @@ function DisplayTraceroute( &$testPath, $run )
             array_key_exists('addr', $hops[-1]) &&
             strlen($hops[-1]['addr']))
             $addr = $hops[-1]['addr'];
-        
+
         $index = 0;
         foreach($hops as $hop => $data) {
             if( $hop > 0 ) {

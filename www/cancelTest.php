@@ -1,4 +1,7 @@
 <?php
+// Copyright 2020 Catchpoint Systems Inc.
+// Use of this source code is governed by the Polyform Shield 1.0.0 license that can be
+// found in the LICENSE.md file.
 include 'common.inc';
 set_time_limit(30000);
 
@@ -25,7 +28,7 @@ if( isset($test['test']) )
             {
                 if( CancelTest($testData['id']) )
                     $count++;
-                    
+
                 foreach( $testData['v'] as $variationIndex => $variationId )
                 {
                     if( CancelTest($variationId) )
@@ -40,21 +43,22 @@ if( isset($test['test']) )
         if( CancelTest($id) )
             echo '<h3 align="center">Test cancelled!</h3>';
         else
-          echo '<h3>Sorry, the test could not be cancelled.  It may have already started or been cancelled</h3>';
+          echo '<h3>Sorry, the test could not be cancelled.  It might have already started or been cancelled</h3>';
     }
     echo '<form><input type="button" value="Back" onClick="history.go(-1);return true;"> </form>';
 }
 
 /**
 * Cancel and individual test
-* 
+*
 * @param mixed $id
+* @return bool
 */
 function CancelTest($id)
 {
+  $cancelled = false;
   $lock = LockTest($id);
   if ($lock) {
-    $cancelled = false;
     $testInfo = GetTestInfo($id);
     if ($testInfo && !array_key_exists('started', $testInfo)) {
       $testInfo['cancelled'] = time();
@@ -65,9 +69,13 @@ function CancelTest($id)
         $ext = 'url';
         if( $testInfo['priority'] )
             $ext = "p{$testInfo['priority']}";
-        $queued_job_file = $testInfo['workdir'] . "/$id.$ext";
-        unlink($queued_job_file);
+        $file_to_search = $testInfo['workdir'] . "/*.$id.$ext";
+        $found_files = glob($file_to_search);
+        if (1 === count($found_files))
+          $cancelled = @unlink($found_files[0]);
       }
+      $testInfo['id'] = $id;
+      SendCallback($testInfo);
     }
     UnlockTest($lock);
   }

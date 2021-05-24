@@ -1,8 +1,11 @@
 <?php
+// Copyright 2020 Catchpoint Systems Inc.
+// Use of this source code is governed by the Polyform Shield 1.0.0 license that can be
+// found in the LICENSE.md file.
 
 /**
-* Move all of the progress images to individual video directories (will usually be there but in th case of a jobsync script I need to move them)
-* 
+* Move all of the progress images to individual video directories (will usually be there but in the case of a jobsync script I need to move them)
+*
 * @param mixed $testPath
 */
 function MoveVideoFiles($testPath)
@@ -10,7 +13,7 @@ function MoveVideoFiles($testPath)
     $dir = opendir($testPath);
     if( $dir )
     {
-        while($file = readdir($dir)) 
+        while($file = readdir($dir))
         {
             if( strpos($file, '_progress_') !== false )
             {
@@ -24,10 +27,10 @@ function MoveVideoFiles($testPath)
                         $destDir = $testPath . "/video_$run";
                         if( strpos($file, '_Cached') !== false )
                             $destDir .= '_cached';
-                            
+
                         if( !is_dir($destDir) )
-                            mkdir($destDir);
-                        
+                            mkdir($destDir, 0777, true);
+
                         $fileBase = $parts[count($parts) - 1];
                         $dest = "$destDir/frame_$fileBase";
                         rename($src, $dest);
@@ -42,7 +45,7 @@ function MoveVideoFiles($testPath)
 
 /**
 * Go through a given test and see if "video" was captured.  If so, build the avisynth script to stitch the images together into a video
-* 
+*
 * @param mixed $testPath
 */
 function BuildVideoScripts($testPath)
@@ -50,7 +53,7 @@ function BuildVideoScripts($testPath)
     $dir = opendir($testPath);
     if( $dir )
     {
-        while($file = readdir($dir)) 
+        while($file = readdir($dir))
         {
             $path = $testPath  . "/$file";
             if( is_dir($path) && !strncmp($file, 'video_', 6) )
@@ -62,8 +65,8 @@ function BuildVideoScripts($testPath)
 }
 
 /**
-* Buiild an avisynth script for the given directory
-* 
+* Build an avisynth script for the given directory
+*
 * @param mixed $videoDir
 */
 function BuildVideoScript($testPath, $videoDir, $endTime = 0, $extend = false, $startOffset = null)
@@ -74,7 +77,7 @@ function BuildVideoScript($testPath, $videoDir, $endTime = 0, $extend = false, $
   $frames = array();
   if( $endTime )
       $endTime = (int)(($endTime + 99) / 100);
-  
+
   if (loadVideo($videoDir, $frames_ms) && count($frames_ms)) {
     // get 10fps frame timings for now - eventually add support for rendering 60fps video
     $frames = array();
@@ -105,7 +108,7 @@ function BuildVideoScript($testPath, $videoDir, $endTime = 0, $extend = false, $
         }
       }
     }
-  
+
     // build the actual script
     if (count($frames) >= 1) {
       $script = '';
@@ -123,20 +126,20 @@ function BuildVideoScript($testPath, $videoDir, $endTime = 0, $extend = false, $
             $count = $index - $lastIndex;
             $script .= "ImageSource(\"$lastFrame\", start = 1, end = $count, fps = 10) + \\ \r\n";
           }
-          
+
           $lastFrame = $file;
           $lastIndex = $index;
         }
       }
       $end = $lastIndex;
-      
+
       // put in the last frame
       if( $endTime ) {
         $count = max((int)($endTime - $lastIndex + 1), 1);
         $script .= "ImageSource(\"{$frames[$end]}\", start = 1, end = $count, fps = 10)\r\n";
       } else
         $script .= "ImageSource(\"{$frames[$end]}\", start = 1, end = 1, fps = 10)\r\n";
-      
+
       // write out the script file
       file_put_contents("$videoDir/video.avs", $script);
     }
@@ -145,14 +148,14 @@ function BuildVideoScript($testPath, $videoDir, $endTime = 0, $extend = false, $
 
 /**
 * Create the zip file of the video
-* 
+*
 * @param mixed $videoDir
 */
 function ZipVideo($path)
 {
     if( is_dir($path) )
     {
-        $zipFile .= $path . '/video.zip';    
+        $zipFile .= $path . '/video.zip';
         if( is_file($zipFile) )
             $path = substr($zipFile,1);
         else
@@ -171,20 +174,27 @@ function ZipVideo($path)
             }
 
             if( isset($files) && count($files) )
-            {    
+            {
                 // zip up the results
-                require_once('./lib/pclzip.lib.php');
-                $zip = new PclZip($zipFile);
-                $zip->create($files, PCLZIP_OPT_REMOVE_ALL_PATH);
+                $zip = new ZipArchive();
+                if ($zip->open($zipFile, ZIPARCHIVE::CREATE) === true) {
+                    $files = scandir($path);
+                    foreach ($files as $file) {
+                        $filePath = "$path/$file";
+                        if ($file != 'video.zip' && is_file($filePath))
+                            $zip->addFile($filePath, $file);
+                    }
+                    $zip->close();
+                }
                 $path = substr($zipFile,1);
             }
-            
+
         }
     }
     else
         unset($path);
-        
+
     return $path;
 }
-  
+
 ?>

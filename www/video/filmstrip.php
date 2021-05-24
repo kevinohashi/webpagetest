@@ -1,12 +1,16 @@
 <?php
+// Copyright 2020 Catchpoint Systems Inc.
+// Use of this source code is governed by the Polyform Shield 1.0.0 license that can be
+// found in the LICENSE.md file.
 header('Content-disposition: attachment; filename=filmstrip.png');
 header ("Content-type: image/png");
 
+require_once __DIR__ . '/../include/TestPaths.php';
 chdir('..');
 include 'common.inc';
 require_once('page_data.inc');
 require_once('draw.inc');
-include 'video/filmstrip.inc.php';  // include the commpn php shared across the filmstrip code
+include 'video/filmstrip.inc.php';  // include the common PHP shared across the filmstrip code
 
 $colMargin = 5;
 $rowMargin = 5;
@@ -21,10 +25,10 @@ $thumbTop = $fontHeight + $rowMargin;
 $bgcolor = '000000';
 $color = 'ffffff';
 if (array_key_exists('bg', $_GET)) {
-    $bgcolor = $_GET['bg'];
+    $bgcolor = preg_replace('/[^0-9a-fA-F]/', '', $_GET['bg']);
 }
 if (array_key_exists('text', $_GET)) {
-    $color = $_GET['text'];
+    $color = preg_replace('/[^0-9a-fA-F]/', '', $_GET['text']);
 }
 $bgcolor = html2rgb($bgcolor);
 $color = html2rgb($color);
@@ -94,7 +98,7 @@ $im = imagecreatetruecolor($width, $height);
 $background = GetColor($im, $bgcolor[0], $bgcolor[1], $bgcolor[2]);
 $textColor = GetColor($im, $color[0], $color[1], $color[2]);
 $colChanged = GetColor($im, 254,179,1);
-$colAFT = GetColor($im, 255,0,0);
+$colLCP = GetColor($im, 255,0,0);
 
 imagefilledrectangle($im, 0, 0, $width, $height, $background);
 
@@ -137,8 +141,14 @@ foreach( $tests as &$test ) {
         imagedestroy($thumb);
         unset($thumb);
     }
+    $lcp = null;
+    if (isset($test['stepResult']) && is_a($test['stepResult'], "TestStepResult")) {
+        $lcp = $test['stepResult']->getMetric('chromeUserTiming.LargestContentfulPaint');
+    }
     $frameCount = 0;
     $ms = 0;
+    $localPaths = new TestPaths(GetTestPath($test['id']), $test['run'], $test['cached'], $test['step']);
+    $videoDir = $localPaths->videoDir();
     while( $ms < $filmstrip_end_time ) {
         $ms = $frameCount * $interval;
         $frameCount++;
@@ -158,23 +168,31 @@ foreach( $tests as &$test ) {
             $cached = '';
             if( $test['cached'] )
                 $cached = '_cached';
-            $imgPath = GetTestPath($test['id']) . "/video_{$test['run']}$cached/$path";
+            $imgPath = $videoDir . "/" . $path;
             if( $lastThumb != $path || !$thumb ) {
-                if( $lastThumb != $path )
+                if( $lastThumb != $path ) {
                     $border = $colChanged;
+                    if (isset($lcp) && $ms >= $lcp) {
+                        $border = $colLCP;
+                        $lcp = null;
+                    }
+                }
                 // load the new thumbnail
                 if( $thumb ) {
                     imagedestroy($thumb);
                     unset($thuumb);
                 }
-                $tmp = imagecreatefromjpeg("./$imgPath");
+                if (strtolower(substr($imgPath, -4)) == '.png')
+                  $tmp = imagecreatefrompng("./$imgPath");
+                else
+                  $tmp = imagecreatefromjpeg("./$imgPath");
                 if( $tmp ) {
                     $thumb = imagecreatetruecolor($test['video']['thumbWidth'], $test['video']['thumbHeight']);
                     fastimagecopyresampled($thumb, $tmp, 0, 0, 0, 0, $test['video']['thumbWidth'], $test['video']['thumbHeight'], imagesx($tmp), imagesy($tmp), 4);
                     imagedestroy($tmp);
                 }
             }
-            
+
             // draw the thumbnail
             $left += $colMargin;
             $width = imagesx($thumb);
@@ -183,34 +201,15 @@ foreach( $tests as &$test ) {
                 imagefilledrectangle($im, $left - 2 + $padding, $top - 2, $left + imagesx($thumb) + 2 + $padding, $top + imagesy($thumb) + 2, $border);
             imagecopy($im, $thumb, $left + $padding, $top, 0, 0, $width, imagesy($thumb));
             $left += $columnWidth + $colMargin;
-            
+
             $lastThumb = $path;
         }
     }
-    
+
     $top += $test['video']['thumbHeight'] + $rowMargin;
 }
 
 // spit the image out to the browser
 imagepng($im);
 imagedestroy($im);
-
-function html2rgb($color) {
-    if ($color[0] == '#')
-        $color = substr($color, 1);
-
-    if (strlen($color) == 6)
-        list($r, $g, $b) = array($color[0].$color[1],
-                                 $color[2].$color[3],
-                                 $color[4].$color[5]);
-    elseif (strlen($color) == 3)
-        list($r, $g, $b) = array($color[0].$color[0], $color[1].$color[1], $color[2].$color[2]);
-    else
-        return false;
-
-    $r = hexdec($r); $g = hexdec($g); $b = hexdec($b);
-
-    return array($r, $g, $b);
-}
-
 ?>

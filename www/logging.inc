@@ -1,4 +1,7 @@
 <?php
+// Copyright 2020 Catchpoint Systems Inc.
+// Use of this source code is governed by the Polyform Shield 1.0.0 license that can be
+// found in the LICENSE.md file.
 
 /**
  * Message logging
@@ -29,7 +32,7 @@ function logWithLocation($msg, $backtraceFrameIndex = 0)
 }
 
 /**
- * Log unexpected input.  Usefull for debugging interaction with an agent.
+ * Log unexpected input.  Useful for debugging interaction with an agent.
  * Search for "Unexpected input" to find these messages in the logs.
  * Set a breakpoint in this function to stop on unexpected input.
  * @param mixed $msg
@@ -42,7 +45,7 @@ function logMalformedInput($msg)
 
 /**
 * Log a message to the error log
-* 
+*
 * @param mixed $msg
 */
 function logError($msg) {
@@ -50,7 +53,7 @@ function logError($msg) {
   if (!is_dir($dir))
     mkdir($dir, 0744, true);
   if (is_dir($dir)) {
-    // Delete any error logs that are more than a week old
+    // Delete any error logs more than a week old
     $files = glob("$dir/error.log.*");
     $UTC = new DateTimeZone('UTC');
     $now = time();

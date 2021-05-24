@@ -1,4 +1,8 @@
 <?php
+// Copyright 2020 Catchpoint Systems Inc.
+// Use of this source code is governed by the Polyform Shield 1.0.0 license that can be
+// found in the LICENSE.md file.
+//$DISABLE_RESTORE = true;
 require_once('common.inc');
 require_once('testStatus.inc');
 set_time_limit(60*5);
@@ -61,35 +65,18 @@ if( isset($_REQUEST['tests']) && strlen($_REQUEST['tests']) )
         $ret['statusCode'] = 100;
         $ret['statusText'] = "Completed {$ret['data']['testsCompleted']} of {$ret['data']['testsExpected']} tests";
     }
-} else {
+} elseif (isset($id) && strlen($id)) {
     $ret['data'] = GetTestStatus($id, $position);
     $ret['statusCode'] = $ret['data']['statusCode'];
     $ret['statusText'] = $ret['data']['statusText'];
 }
 
 // spit out the response in the correct format
-if( $_REQUEST['f'] == 'xml' )
+if( isset($_REQUEST['f']) && $_REQUEST['f'] == 'xml' )
 {
     header ('Content-type: text/xml');
-    echo "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n";
-    echo "<response>\n";
-    
-    foreach( $ret as $key => &$val )
-    {
-        echo "<$key>";
-        if( $key == 'data' )
-        {
-            echo "\n";
-            foreach( $val as $k => $v )
-                echo("<$k>$v</$k>\n");
-        }
-        else
-            echo $val;
-            
-        echo "</$key>\n";
-    }
-    
-    echo "</response>\n";
+    print_r( array2xml( $ret, false ));
+
 }
 else
 {

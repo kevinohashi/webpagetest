@@ -1,4 +1,7 @@
 <?php
+// Copyright 2020 Catchpoint Systems Inc.
+// Use of this source code is governed by the Polyform Shield 1.0.0 license that can be
+// found in the LICENSE.md file.
 // Jobs that need to run every 15 minutes
 chdir('..');
 include 'common.inc';
@@ -10,25 +13,12 @@ $lock = Lock("cron-15", false, 1200);
 if (!isset($lock))
   exit(0);
 
-// update the appurify devices if we have an API key configured
-$locations = LoadLocationsIni();
-foreach ($locations as $configuration) {
-  if (is_array($configuration) &&
-      array_key_exists('type', $configuration) &&
-      stripos($configuration['type'], 'Appurify') !== false &&
-      array_key_exists('key', $configuration) &&
-      strlen($configuration['key']) &&
-      array_key_exists('secret', $configuration) &&
-      strlen($configuration['secret'])) {
-    require_once('./lib/appurify.inc.php');
-    $appurify = new Appurify($configuration['key'], $configuration['secret']);
-    $appurify->GetDevices(true);
-    $appurify->GetConnections(true);
-    unset($appurify);
-  }
-}
+header("Content-type: text/plain");
+header("Cache-Control: no-cache, must-revalidate");
+header("Expires: Sat, 26 Jul 1997 05:00:00 GMT");
 
 // update the feeds
+echo "Updating Feeds\n";
 require_once('updateFeeds.php');
 UpdateFeeds();
 ?>

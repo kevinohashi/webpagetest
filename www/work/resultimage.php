@@ -1,4 +1,7 @@
 <?php
+// Copyright 2020 Catchpoint Systems Inc.
+// Use of this source code is governed by the Polyform Shield 1.0.0 license that can be
+// found in the LICENSE.md file.
 
 header('Content-type: text/plain');
 header("Cache-Control: no-cache, must-revalidate");
@@ -6,62 +9,76 @@ header("Expires: Sat, 26 Jul 1997 05:00:00 GMT");
 set_time_limit(300);
 chdir('..');
 include 'common_lib.inc';
+
+require_once 'include/TestPaths.php';
+
 $key = '';
 if (array_key_exists('key', $_REQUEST))
   $key = $_REQUEST['key'];
 $id = $_REQUEST['id'];
 
-$path = './' . GetTestPath($id);
-$testPath = $path;
+$testPath = './' . GetTestPath($id);
+
 if (ValidateTestId($id)) {
   $testInfo = GetTestInfo($id);
-  if ($testInfo && is_array($testInfo) && array_key_exists('location', $testInfo)) {
+  if ($testInfo && is_array($testInfo) && isset($testInfo['location'])) {
     $location = $testInfo['location'];
     $locKey = GetLocationKey($location);
-    if ((!strlen($locKey) || !strcmp($key, $locKey)) || !strcmp($_SERVER['REMOTE_ADDR'], "127.0.0.1")) {
-      if (array_key_exists('file', $_FILES) && array_key_exists('name', $_FILES['file'])) {
-        $fileName = $_FILES['file']['name'];
-        if (strpos($fileName, '..') === false &&
-            strpos($fileName, '/') === false &&
-            strpos($fileName, '\\') === false) {
-          // make sure the file is an acceptable type
-          $parts = pathinfo($fileName);
-          $ext = strtolower($parts['extension']);
-          $ok = false;
-          if (strpos($ext, 'php') === false &&
-              strpos($ext, 'pl') === false &&
-              strpos($ext, 'py') === false &&
-              strpos($ext, 'cgi') === false &&
-              strpos($ext, 'asp') === false &&
-              strpos($ext, 'js') === false &&
-              strpos($ext, 'rb') === false &&
-              strpos($ext, 'htaccess') === false &&
-              strpos($ext, 'jar') === false) {
-              $ok = true;
-          }
-          
-          if ($ok) {
-            // put each run of video data in it's own directory
-            if (strpos($fileName, 'progress')) {
-              $parts = explode('_', $fileName);
-              if (count($parts)) {
-                $runNum = $parts[0];
-                $fileBase = $parts[count($parts) - 1];
-                $cached = '';
-                if( strpos($fileName, '_Cached') )
-                  $cached = '_cached';
-                $path .= "/video_$runNum$cached";
-                if( !is_dir($path) )
-                  mkdir($path);
-                $fileName = 'frame_' . $fileBase;
-              }
-            }
-            MoveUploadedFile($_FILES['file']['tmp_name'], "$path/$fileName");
+    if (isset($locKey)) {
+      if ((!strlen($locKey) || !strcmp($key, $locKey)) || !strcmp($_SERVER['REMOTE_ADDR'], "127.0.0.1")) {
+        if (array_key_exists('file', $_FILES) && array_key_exists('name', $_FILES['file'])) {
+          $fileName = $_FILES['file']['name'];
+          if (validateUploadFileName($fileName)) {
+            $fileDestination = getFileDestination($testPath, $fileName);
+            MoveUploadedFile($_FILES['file']['tmp_name'], $fileDestination);
           }
         }
       }
     }
   }
+}
+
+
+/**
+ * @param $testRoot string Root directory for the test
+ * @param $fileName string Name of the uploaded file
+ * @return string Destination path for the uploaded file
+ */
+function getFileDestination($testRoot, $fileName) {
+  if (!isVideoFile($fileName)) {
+    // non-video files are simply copied to the test root
+    return $testRoot . "/" . $fileName;
+  }
+
+  // put each run of video data in its own directory
+  $testPaths = TestPaths::fromUnderscoreFileName($testRoot, $fileName);
+  // make sure video dir exists
+  $videoDir = $testPaths->videoDir();
+  if (!is_dir($videoDir)) {
+    mkdir($videoDir, 0777, true);
+  }
+  return getVideoFilePath($testPaths);
+}
+
+/**
+ * @param $fileName string fileName to check
+ * @return bool True if the file is part of a video, false otherwise
+ */
+function isVideoFile($fileName) {
+  return (strpos($fileName, "progress_") !== false) ||
+         (strpos($fileName, "_ms_") !== false);
+}
+
+/**
+ * @param $testPaths TestPaths The TestPaths object corresponding created from the uploaded file
+ * @return string The destination path for the image file of this video
+ */
+function getVideoFilePath($testPaths) {
+  $baseName = $testPaths->getParsedBaseName();
+  // parsed file names either include "progress_<frameNumber>" or "_ms_<milliSeconds>"
+  $namePrefix = strpos($baseName, "progress") !== false ? "frame_" : "ms_";
+  $parts = explode('_', $baseName);
+  return $testPaths->videoDir() . "/" . $namePrefix . $parts[count($parts) - 1];
 }
 
 /**
@@ -73,4 +90,3 @@ function MoveUploadedFile($src, $dest) {
   @chmod($dest, 0666);
 }
 ?>
-

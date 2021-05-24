@@ -1,4 +1,7 @@
 <?php
+// Copyright 2020 Catchpoint Systems Inc.
+// Use of this source code is governed by the Polyform Shield 1.0.0 license that can be
+// found in the LICENSE.md file.
 require_once('draw.inc');
 
 /**
@@ -56,7 +59,7 @@ function drawChecklist($url, &$requests, &$pageData, $imageMap = false)
             $i++;
         }
 
-        // draw the optimization checks separators
+        // draw the optimization checks' separators
         $standards = array( 'score_keep-alive' => 'Keep-Alive',
                             'score_gzip' => 'GZip',
                             'score_compress' => 'Compress Img',
@@ -89,7 +92,7 @@ function drawChecklist($url, &$requests, &$pageData, $imageMap = false)
             $x += $inc;
         }
 
-        // put the url label in
+        // put the URL label in
         $x = 4;
         $y = 2 + $rowHeight;
         $label = $url;

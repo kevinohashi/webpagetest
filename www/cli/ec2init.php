@@ -1,4 +1,9 @@
 <?php
+// Copyright 2020 Catchpoint Systems Inc.
+// Use of this source code is governed by the Polyform Shield 1.0.0 license that can be
+// found in the LICENSE.md file.
+if (php_sapi_name() != 'cli')
+  exit(1);
 set_time_limit(0);
 $dir = getcwd();
 chdir(__DIR__);
@@ -14,7 +19,7 @@ if (!Initialized()) {
       sleep(5);
     echo "updating";
     // Update from git and re-run
-    shell_exec('git pull origin master');
+    shell_exec('git pull');
     echo "Re-launching for update\n";
     shell_exec('php "' . __FILE__ .'" updated');
   } else {
@@ -25,7 +30,7 @@ if (!Initialized()) {
   }
 }
 
-// go back to whatever working directory was being used before running the script
+// go back to whichever working directory was being used before running the script
 chdir($dir);
 
 function UpdateSettings() {
@@ -82,13 +87,19 @@ function SetupAPIKeys() {
   $keys .= "description=API Key\n";
   $keys .= "limit=0\n";
   $keys .= "\n";
-  
+
   file_put_contents('./settings/keys.ini', $keys);
 }
 
 function GetUserData() {
   $ret = false;
-  $data = file_get_contents("http://169.254.169.254/latest/user-data");
+  if (file_exists('./cli/user-data')){
+    echo "Using local userdata file\n";
+    $data = file_get_contents('./cli/user-data');
+  } else {
+    echo "Looking for remote userdata file\n";
+    $data = file_get_contents("http://169.254.169.254/latest/user-data");
+  }
   if ($data !== false && strlen($data)) {
     $ret = array();
     $lines = explode("\n", $data);

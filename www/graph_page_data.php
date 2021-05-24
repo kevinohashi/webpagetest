@@ -1,6 +1,10 @@
-<?php 
+<?php
+// Copyright 2020 Catchpoint Systems Inc.
+// Use of this source code is governed by the Polyform Shield 1.0.0 license that can be
+// found in the LICENSE.md file.
 // We intend to change to "?tests" but also allow "?test" so as to not break existing links.
 $tests = (isset($_REQUEST['tests'])) ? $_REQUEST['tests'] : $_REQUEST['test'];
+$tests = preg_replace('/[^a-zA-Z0-9,_\.\-:\ ]/', '', $tests);
 
 // Get choice of statistical control from request URL.
 $statControl = 'None'; // 'None' or index starting with 1 into list of tests.
@@ -30,10 +34,8 @@ if (count($testsId) == 1) {
   $_REQUEST['test'] = $testsId[0];
 }
 include 'common.inc';
-require_once('lib/PHPStats/PHPStats.phar');
 require_once('page_data.inc');
 require_once('graph_page_data.inc');
-require_once('stat.inc');
 $page_keywords = array('Graph Page Data','Webpagetest','Website Speed Test','Page Speed', 'comparison');
 $page_description = "Graph Page Data Comparison.";
 
@@ -65,17 +67,9 @@ if ($rv) {
 $median_run = (isset($_REQUEST['median_run'])) ? $_REQUEST['median_run'] : 0;
 $median_value = (isset($_REQUEST['median_value'])) ? $_REQUEST['median_value']  : 0;
 
-// Remove speed index if none of the runs have video.
-$removeSpeedIndex = true;
-foreach ( $testsInfo as $testInfo ) {
-  if ($testInfo && $testInfo['video']) {
-    $removeSpeedIndex = false;
-    break;
-  }
-}
+//whether to set charts v-axis to 0
+$zero_start = (isset($_REQUEST['zero_start'])) ? "true" : "false";
 
-// Color palette taken from benchmarks/view.php
-// TODO(geening): Combine this with the colors in benchmarks/view.php
 // TODO(geening): Have a cleaner way to support more than 8 tests with
 // distinct-looking colors.
 $colors = array('#ed2d2e', '#008c47', '#1859a9', '#662c91', '#f37d22', '#a11d20', '#b33893', '#010101');
@@ -93,9 +87,9 @@ $common_label = implode(" ", $common_labels);
 
 ?>
 <!DOCTYPE html>
-<html>
+<html lang="en-us">
     <head>
-        <title>WebPagetest - Graph Page Data</title>
+        <title>WebPageTest - Graph Page Data</title>
         <meta http-equiv="charset" content="iso-8859-1">
         <meta name="author" content="Patrick Meenan">
         <?php $gaTemplate = 'Graph'; include ('head.inc'); ?>
@@ -104,32 +98,61 @@ $common_label = implode(" ", $common_labels);
           text-align: left;
           font-size:  large;
         }
+        .chartStats {
+          clear: both;
+          text-align: left;
+        }
+        .chartStats table {
+          margin-left: 0;
+        }
+        .chartStats td {
+          text-align: right !important;
+        }
+        .chart {
+          min-height: 500px;
+        }
         </style>
     </head>
-    <body>
-        <div class="page">
-            <?php
+    <body <?php if ($COMPACT_MODE) {echo 'class="compact"';} ?>>
+    <?php
             if (count($testsId) == 1) {
               $tab = 'Test Result';
             }
             include 'header.inc';
+            
+            if (count($testsId) != 1) {
+              ?>
+              <div class="box">
+              <?php
+            }
             ?>
-            <div style="float: right;">
-                <form name="cached" method="get" action="graph_page_data.php">
+            <div>
+                <form class="simple_form" name="cached" method="get" action="graph_page_data.php">
                     <?php
                     echo "<input type=\"hidden\" name=\"tests\" value=\"$tests\">";
                     echo "<input type=\"hidden\" name=\"medianMetric\" value=\"$median_metric\">";
                     ?>
-                    View: <input type="checkbox" name="fv" value="1"
-                        <?php if ($fv == '1') echo "checked"; ?> >First
-                    <input type="checkbox" name="rv" value="1"
-                        <?php if ($rv == '1') echo "checked"; ?> >Repeat<br>
-                    Median: <input type="checkbox" name="median_value" value="1"
-                        <?php if ($median_value == '1') echo "checked"; ?> >Of plotted metric
-                        <input type="checkbox" name="median_run" value="1"
-                            <?php if ($median_run == '1') echo "checked"; ?> >Run with median
-                        <?php echo $median_metric; ?> <br>
-                    Statistical Comparison Against <select id="control" name="control" size="1" onchange="this.form.submit();">
+                    <fieldset>
+                      <legend>View:</legend>
+                    <input type="checkbox" name="fv" id="fv" value="1"
+                        <?php if ($fv == '1') echo "checked"; ?> ><label for="fv">First</label>
+                    <input type="checkbox" name="rv" id="rv" value="1"
+                        <?php if ($rv == '1') echo "checked"; ?> ><label for="rv">Repeat</label>
+          </fieldset>
+          <fieldset>
+            <legend>Median:</legend>
+                   <input type="checkbox" id="median_value" name="median_value" value="1"
+                        <?php if ($median_value == '1') echo "checked"; ?> ><label for="median_value">Of plotted metric</label>
+                        <input type="checkbox" name="median_run" id="median_run" value="1"
+                            <?php if ($median_run == '1') echo "checked"; ?> ><label for="median_run">Run with median
+                        <?php echo $median_metric; ?></label>
+          </fieldset>
+          <fieldset>
+                    <legend>Chart customization</legend>
+                    <input type="checkbox" name="zero_start" value="true" <?php if ($zero_start == 'true') echo "checked"; ?>>
+<label for="zero_start">Force Vertical Axis of Charts to Start at Zero</label>
+                    </fieldset>
+                    <label for="control">Statistical Comparison Against</label> <select id="control" name="control" size="1" onchange="this.form.submit();">
                     <option value="NOSTAT"<?php if ($statControl === "NOSTAT") echo " selected"; ?>>None</option>
                     <?php
                     foreach ($pagesData as $key=>$pageData) {
@@ -138,47 +161,74 @@ $common_label = implode(" ", $common_labels);
                     }
                     ?>
                     </select>
-                    <br>
-                    Tests:
+
+                    <p>
+                    <strong>Tests:</strong>
                     <?php
                     for ($i = 0; $i < count($testsId); $i++) {
                       echo "<br>" . $testsId[$i] . "-l:" . $testsLabel[$i];
                     }
                     ?>
-                    <br>
-                    <input type="submit">
+                    </p>
+                    <input type="submit" value="Plot Results">
                 </form>
             </div>
 
-            <div id="result">
-            <h1>Test Result Data Plots</h1>
+            <div id="result" class="test_results-content">
+            
             <?php
+            $web_vitals = array();
+            foreach ($pagesData as &$pageData) {
+              foreach ($pageData as &$pageRun) {
+                foreach ($pageRun as &$data) {
+                  if (isset($data['firstContentfulPaint']))
+                    $web_vitals['firstContentfulPaint'] = 'First Contentful Paint (ms)';
+                  if (isset($data['chromeUserTiming.LargestContentfulPaint']))
+                    $web_vitals['chromeUserTiming.LargestContentfulPaint'] = 'Largest Contentful Paint (ms)';
+                  if (isset($data['chromeUserTiming.CumulativeLayoutShift']))
+                    $web_vitals['chromeUserTiming.CumulativeLayoutShift'] = 'Cumulative Layout Shift';
+                  if (isset($data['TotalBlockingTime']))
+                    $web_vitals['TotalBlockingTime'] = 'Total Blocking Time (ms)';
+                }
+              }
+            }
+            if (count($web_vitals)) {
+              echo '<h1>Web Vitals</h1>';
+              foreach($web_vitals as $metric => $label) {
+                InsertChart($metric, $label);
+              }
+            }
             if (count($common_labels) > 0) {
               echo "<h2 style='text-align: center'>${common_label}</h2>";
             }
             ?>
             <?php
-            $metrics = array('docTime' => 'Load Time (onload - ms)', 
-                            'SpeedIndex' => 'Speed Index',
-                            'TTFB' => 'Time to First Byte (ms)', 
-                            'basePageSSLTime' => 'Base Page SSL Time (ms)',
-                            'render' => 'Time to Start Render (ms)', 
-                            'visualComplete' => 'Time to Visually Complete (ms)',
-                            'lastVisualChange' => 'Last Visual Change (ms)', 
-                            'titleTime' => 'Time to Title (ms)',
-                            'fullyLoaded' => 'Fully Loaded (ms)', 
-                            'server_rtt' => 'Estimated RTT to Server (ms)',
-                            'docCPUms' => 'CPU Busy Time',
-                            'domElements' => 'Number of DOM Elements', 
-                            'connections' => 'Connections', 
-                            'requests' => 'Requests (Fully Loaded)', 
-                            'requestsDoc' => 'Requests (onload)', 
-                            'bytesInDoc' => 'Bytes In (onload)', 
-                            'bytesIn' => 'Bytes In (Fully Loaded)', 
-                            'browser_version' => 'Browser Version');
+            $metrics = array(
+              'docTime' => 'Load Time (onload - ms)',
+              'loadEventStart' => 'Browser-reported Load Time (Navigation Timing onload)',
+              'domContentLoadedEventStart' => 'DOM Content Loaded (Navigation Timing)',
+              'SpeedIndex' => 'Speed Index',
+              'TTFB' => 'Time to First Byte (ms)',
+              'basePageSSLTime' => 'Base Page SSL Time (ms)',
+              'render' => 'Time to Start Render (ms)',
+              'LastInteractive' => 'Time to Interactive (ms) - Beta',
+              'visualComplete' => 'Time to Visually Complete (ms)',
+              'lastVisualChange' => 'Last Visual Change (ms)',
+              'titleTime' => 'Time to Title (ms)',
+              'fullyLoaded' => 'Fully Loaded (ms)',
+              'server_rtt' => 'Estimated RTT to Server (ms)',
+              'docCPUms' => 'CPU Busy Time',
+              'domElements' => 'Number of DOM Elements',
+              'connections' => 'Connections',
+              'requests' => 'Requests (Fully Loaded)',
+              'requestsDoc' => 'Requests (onload)',
+              'bytesInDoc' => 'Bytes In (onload)',
+              'bytesIn' => 'Bytes In (Fully Loaded)',
+              'browser_version' => 'Browser Version'
+            );
             $customMetrics = null;
-            $csiMetrics = null;
             $userTimings = null;
+            $userMeasures = null;
             foreach ($pagesData as &$pageData) {
               foreach ($pageData as &$pageRun)
                 foreach ($pageRun as &$data) {
@@ -197,19 +247,14 @@ $common_label = implode(" ", $common_labels);
                       if (!isset($userTimings))
                         $userTimings = array();
                       $userTimings[$metric] = 'User Timing - ' . substr($metric, 9);
+                    } else if (substr($metric, 0, 18) == 'userTimingMeasure.') {
+                      if (!isset($userMeasures))
+                        $userMeasures = array();
+                      $userMeasures[$metric] = 'User Timing Measure - ' . substr($metric, 18);
                     }
                   }
                   $timingCount = count($userTimings);
-                  if (array_key_exists('CSI', $data) && is_array($data['CSI']) && count($data['CSI'])) {
-                    if (!isset($csiMetrics))
-                      $csiMetrics = array();
-                    foreach ($data['CSI'] as $metric) {
-                      if (preg_match('/^[0-9\.]+$/', $data["CSI.$metric"]) &&
-                          !array_key_exists($metric, $csiMetrics)) {
-                        $csiMetrics[$metric] = "CSI - $metric";
-                      }
-                    }
-                  }
+                  $measuresCount = count($userMeasures);
                 }
             }
 
@@ -232,21 +277,27 @@ $common_label = implode(" ", $common_labels);
                 InsertChart($metric, $label);
               }
             }
-            if (isset($csiMetrics) && is_array($csiMetrics) && count($csiMetrics)) {
-              echo '<h1 id="CSI">CSI Metrics</h1>';
-              foreach($csiMetrics as $metric => $label) {
-                InsertChart("CSI.$metric", $label);
+            if (isset($userMeasures) && is_array($userMeasures) && count($userMeasures)) {
+              echo '<h1 id="UserTimingMeasure"><a href="http://www.w3.org/TR/user-timing/#dom-performance-measure">W3C User Timing measures</a></h1>';
+              foreach($userMeasures as $metric => $label) {
+                InsertChart($metric, $label);
               }
             }
             ?>
             </div>
-
+          </div>
             <?php include('footer.inc'); ?>
             <script type="text/javascript" src="//www.google.com/jsapi"></script>
             <script type="text/javascript">
                 <?php
-                    echo "var chartData = " . json_encode($chartData) . ";\n";
+                    $chartDataJson = json_encode($chartData);
+                    // If JSON encode fails due to inf and nan, replace those occurences with '0' in the serialized output then retry.
+                    if (json_last_error() == JSON_ERROR_INF_OR_NAN) {
+                      $chartDataJson = json_encode(unserialize(str_replace(array('NAN;', 'INF;'), '0;', serialize($chartData))));
+                    }
+                    echo "var chartData = " . $chartDataJson . ";\n";
                     echo "var runs = $num_runs;\n";
+                    echo "var zeroStart = $zero_start;\n";
                 ?>
             <?php include('graph_page_data.js'); ?>
             </script>
@@ -278,6 +329,26 @@ function InsertChart($metric, $label) {
   global $median_run;
   global $statControl;
 
+  // Make sure we have data for the metric and that it is numeric
+  $metric_ok = false;
+  foreach ($views as $cached) {
+    foreach ($pagesData as $key=>$pageData) {
+      $values = values($pageData, $cached, $metric, true);
+      if (isset($values)) {
+        foreach($values as $value){
+          if (is_numeric($value)) {
+            $metric_ok = true;
+            break;
+          }
+        }
+      }
+    }
+    if ($metric_ok)
+      break;
+  }
+  if (!$metric_ok)
+    return;
+
   $num_runs = max(array_map("numRunsFromTestInfo", $testsInfo));
 
   // Write HTML for chart
@@ -289,6 +360,46 @@ function InsertChart($metric, $label) {
   $chartColumns = array(ChartColumn::runs($num_runs));
   $compareTable = array();
   $view_index = 0;
+
+  if ($num_runs >= 3) {
+    echo '<div class="chartStats scrollableTable"><table class="pretty">';
+    echo '<tr><td></td><th>Mean</th><th>Median</th><th>p25</th><th>p75</th><th>p75-p25</th><th>StdDev</th><th>CV</th></tr>';
+    foreach ($views as $cached) {
+      // For each run in that view
+      $pageData = reset($pagesData);
+
+    foreach ($pagesData as $key=>$pageData) {
+      echo '<tr>';
+      $label = ($cached == '1') ? 'Repeat View' : 'First View';
+      echo "<th style=\"text-align: right;\">$label<br/>$testsLabel[$key]</th>";
+      $values = values($pageData, $cached, $metric, true);
+      sort($values, SORT_NUMERIC);
+      $sum = array_sum($values);
+      $count = count($values);
+      $mean = $count ? number_format($sum / $count, 3, '.', '') : 0;
+      echo "<td>$mean</td>";
+      $median = $values[intval($count / 2)];
+      echo "<td>$median</td>";
+      $p25 = $values[intval($count * 0.25)];
+      echo "<td>$p25</td>";
+      $p75 = $values[intval($count * 0.75)];
+      echo "<td>$p75</td>";
+      echo "<td>" . ($p75 - $p25) . "</td>";
+      $sqsum = 0;
+      foreach ($values as $value)
+          $sqsum += pow($value - $mean, 2);
+      $stddev = $count ? number_format(sqrt($sqsum / $count), 3, '.', '') : 0;
+      echo "<td>$stddev</td>";
+      if ($mean > 0)
+        echo "<td>" . number_format(($stddev/$mean) * 100, 3, '.', '') . "%</td>";
+      else
+        echo "<td></td>";
+
+      echo '</tr>';
+    }
+    }
+    echo '</table></div>';
+  }
 
   // For each view (first / repeat) that we want to show
   foreach ($views as $cached) {
@@ -322,7 +433,9 @@ function InsertChart($metric, $label) {
         $statLabels[] = implode(" ", $labels);
       }
     }
-    if (($statControl !== 'NOSTAT') && (count($pagesData) >= 1)) {
+    if (is_file('lib/PHPStats/PHPStats.phar') && ($statControl !== 'NOSTAT') && (count($pagesData) >= 1)) {
+      require_once('lib/PHPStats/PHPStats.phar');
+      require_once('stat.inc');
 
       // First populate compareFrom for statistical control, if it has values
       if (count($statValues[$statControl]) > 0) {
